@@ -141,6 +141,7 @@ function buildServerInitializationOptions(): Record<string, unknown> {
         enabled: config.get<boolean>("indexing.enabled", true),
         concurrency: config.get<number>("indexing.concurrency", 1),
         maxFileSizeKb: config.get<number>("indexing.maxFileSizeKb", 512),
+        excludePaths: config.get<string[]>("indexing.excludePaths", []),
       },
       compiler: {
         includePaths: config.get<string[]>("compiler.includePaths", []),

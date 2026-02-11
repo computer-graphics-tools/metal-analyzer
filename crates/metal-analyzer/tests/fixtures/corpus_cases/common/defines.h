@@ -6,4 +6,4 @@
 #define MTL_CONST
 #endif
 
-#define UZU_PRAGMA_UNROLL _Pragma("clang loop unroll(full)")
+#define FIXTURE_PRAGMA_UNROLL _Pragma("clang loop unroll(full)")

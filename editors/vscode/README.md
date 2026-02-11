@@ -49,6 +49,7 @@ The extension forwards `metal-analyzer.*` settings to the language server in rea
   - `enabled` (default `true`)
   - `concurrency` (default `1`)
   - `maxFileSizeKb` (default `512`)
+  - `excludePaths` (default `[]`; skips matching folders/files for both background indexing and workspace-scope diagnostics)
 - `metal-analyzer.compiler.*`
   - `includePaths` (default `[]`)
   - `extraFlags` (default `[]`)
@@ -63,6 +64,9 @@ Example:
   "metal-analyzer.diagnostics.debounceMs": 300,
   "metal-analyzer.diagnostics.scope": "workspace",
   "metal-analyzer.indexing.maxFileSizeKb": 1024,
+  "metal-analyzer.indexing.excludePaths": [
+    "external/vendor-shaders"
+  ],
   "metal-analyzer.compiler.includePaths": [
     "/path/to/includes"
   ],

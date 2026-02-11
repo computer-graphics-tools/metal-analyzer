@@ -1,5 +1,7 @@
 //! Definition provider implementation.
 
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use dashmap::DashMap;
@@ -10,6 +12,7 @@ use crate::syntax::ast::{self, AstNode};
 use crate::syntax::kind::SyntaxKind;
 use crate::syntax::SyntaxTree;
 use crate::syntax::helpers;
+use crate::metal::builtins::{BuiltinKind, lookup as lookup_builtin};
 
 use super::ast_index::AstIndex;
 use super::clang_nodes::Node;
@@ -178,32 +181,43 @@ impl DefinitionProvider {
         }
         debug!("[goto-def] word={word} at {}:{}", position.line, position.character);
 
-        if let Some(result) = resolve_local_template_parameter(uri, snapshot, source, position, &word) {
-            debug!("[goto-def] TIER-1 (local template param): hit");
-            return Some(result);
-        }
-
-        // 2. AST-based resolution (scope-aware via Clang).
-        let (index, load_source) = self.load_or_build_index(uri, source, include_paths).await?;
-        debug!("[goto-def] AST index source: {}", load_source.as_str());
-
         let source_file = uri
             .to_file_path()
             .ok()
             .map(|p| p.display().to_string())
             .unwrap_or_default();
 
-        if let Some(def) = resolve_precise(&index, &source_file, position, &word) {
-            debug!("[goto-def] TIER-4 (AST precise): hit");
-            return Some(def);
-        }
-        debug!("[goto-def] TIER-4 (AST precise): miss for {word}, trying ranked fallback");
-
-        if let Some(result) = resolve_by_name(&index, &source_file, source, position, &word) {
-            debug!("[goto-def] TIER-5 (AST by-name): hit");
+        if let Some(result) = resolve_local_template_parameter(uri, snapshot, source, position, &word) {
+            debug!("[goto-def] TIER-1 (local template param): hit");
             return Some(result);
         }
-        debug!("[goto-def] TIER-5 (AST by-name): miss/ambiguous for {word}");
+
+        // 1.5 Fast system-header path for obvious Metal SDK symbols.
+        if let Some(result) =
+            resolve_fast_system_symbol_location(source, position, &word, include_paths)
+        {
+            debug!("[goto-def] TIER-2 (system header fast path): hit");
+            return Some(result);
+        }
+
+        // 2. AST-based resolution (scope-aware via Clang).
+        if let Some((index, load_source)) = self.load_or_build_index(uri, source, include_paths).await {
+            debug!("[goto-def] AST index source: {}", load_source.as_str());
+
+            if let Some(def) = resolve_precise(&index, &source_file, position, &word) {
+                debug!("[goto-def] TIER-4 (AST precise): hit");
+                return Some(def);
+            }
+            debug!("[goto-def] TIER-4 (AST precise): miss for {word}, trying ranked fallback");
+
+            if let Some(result) = resolve_by_name(&index, &source_file, source, position, &word) {
+                debug!("[goto-def] TIER-5 (AST by-name): hit");
+                return Some(result);
+            }
+            debug!("[goto-def] TIER-5 (AST by-name): miss/ambiguous for {word}");
+        } else {
+            debug!("[goto-def] AST index unavailable for {uri}; trying fallback tiers");
+        }
 
         // 6. Project-wide index: cross-file definition lookup by name.
         if let Some(result) = resolve_from_project_index(&self.project_index, &source_file, &word)
@@ -212,11 +226,17 @@ impl DefinitionProvider {
             return Some(result);
         }
 
-        // 7. Macro fallback: search for `#define <word>` in the current file.
+        // 7. Builtin/system fallback: map known Metal builtins to SDK headers.
+        if let Some(result) = resolve_builtin_symbol_location(&word, include_paths) {
+            debug!("[goto-def] TIER-7 (system builtin header): hit");
+            return Some(result);
+        }
+
+        // 8. Macro fallback: search for `#define <word>` in the current file.
         //    Clang's AST doesn't include preprocessor macro definitions, so
         //    this text-based fallback is needed for go-to-def on macros.
         if let Some(result) = resolve_macro_definition(uri, source, &word) {
-            debug!("[goto-def] TIER-7 (macro fallback): hit");
+            debug!("[goto-def] TIER-8 (macro fallback): hit");
             return Some(result);
         }
 
@@ -893,10 +913,10 @@ fn resolve_by_name(
             .collect();
 
         if let Some(disambiguated) =
-            disambiguate_member_field_tie(index, &tied, source_file, source, position, word)
+            disambiguate_member_tie(index, &tied, source_file, source, position, word)
         {
             debug!(
-                "[goto-def] TIER-5 disambiguated member field '{word}' to {}:{}:{}",
+                "[goto-def] TIER-5 disambiguated member tie '{word}' to {}:{}:{}",
                 disambiguated.file, disambiguated.line, disambiguated.col
             );
             return def_to_location(disambiguated).map(GotoDefinitionResponse::Scalar);
@@ -993,7 +1013,7 @@ fn resolve_from_project_index(
     def_to_location(best).map(GotoDefinitionResponse::Scalar)
 }
 
-fn rank_definition(word: &str, def: &SymbolDef, source_file: &str) -> (u8, u8, u8, u8, u8) {
+fn rank_definition(word: &str, def: &SymbolDef, source_file: &str) -> (u8, u8, u8, u8) {
     let same_file = if paths_match(&def.file, source_file) { 0 } else { 1 };
     let is_definition = if def.is_definition { 0 } else { 1 };
     let is_parm_var = if matches!(def.kind.as_str(), "ParmVarDecl") {
@@ -1010,23 +1030,15 @@ fn rank_definition(word: &str, def: &SymbolDef, source_file: &str) -> (u8, u8, u
         0
     };
 
-    let helper_penalty = if looks_like_builtin_symbol(word) && looks_like_project_helper_header(&def.file)
-    {
-        1
-    } else {
-        0
-    };
-
     (
         same_file,
         is_definition,
         is_parm_var,
         system_rank,
-        helper_penalty,
     )
 }
 
-fn disambiguate_member_field_tie<'a>(
+fn disambiguate_member_tie<'a>(
     index: &'a AstIndex,
     tied_candidates: &[&'a SymbolDef],
     source_file: &str,
@@ -1037,22 +1049,56 @@ fn disambiguate_member_field_tie<'a>(
     let receiver = extract_member_receiver_identifier(source, position, word)?;
     let cursor_line = position.line + 1;
     let cursor_col = position.character + 1;
-    let receiver_type =
-        infer_local_identifier_type_name(index, source_file, cursor_line, cursor_col, &receiver)?;
-    let receiver_type = short_type_name(&receiver_type);
+    let receiver_type = infer_local_identifier_type_name(
+        index,
+        source_file,
+        cursor_line,
+        cursor_col,
+        &receiver,
+    )
+    .map(|type_name| short_type_name(&type_name).to_string());
 
-    let matches: Vec<&SymbolDef> = tied_candidates
+    let mut matches: Vec<&SymbolDef> = tied_candidates
         .iter()
         .copied()
-        .filter(|candidate| candidate.kind == "FieldDecl")
-        .filter(|candidate| {
-            enclosing_record_name_for_field(index, candidate)
-                .is_some_and(|owner_name| short_type_name(owner_name) == receiver_type)
-        })
+        .filter(is_member_candidate)
         .collect();
+    if matches.is_empty() {
+        return None;
+    }
+
+    if let Some(receiver_type) = receiver_type.as_deref() {
+        let owner_matched: Vec<&SymbolDef> = matches
+            .iter()
+            .copied()
+            .filter(|candidate| {
+                enclosing_record_name_for_member(index, candidate)
+                    .is_some_and(|owner_name| short_type_name(owner_name) == receiver_type)
+            })
+            .collect();
+        if !owner_matched.is_empty() {
+            matches = owner_matched;
+        }
+    } else if matches.iter().all(|candidate| candidate.kind == "CXXMethodDecl") {
+        let owner_names: HashSet<&str> = matches
+            .iter()
+            .filter_map(|candidate| enclosing_record_name_for_member(index, candidate))
+            .map(short_type_name)
+            .collect();
+        if owner_names.len() > 1 {
+            return None;
+        }
+    } else {
+        // Keep field/member-value ties conservative when we cannot infer receiver type.
+        return None;
+    }
 
     if matches.len() == 1 {
         return matches.first().copied();
+    }
+
+    if matches.iter().all(|candidate| candidate.kind == "CXXMethodDecl") {
+        return select_method_overload_for_member_call(matches, source, position, word);
     }
 
     None
@@ -1098,19 +1144,176 @@ fn local_value_kind_rank(kind: &str) -> u8 {
     }
 }
 
-fn enclosing_record_name_for_field<'a>(index: &'a AstIndex, field: &SymbolDef) -> Option<&'a str> {
-    if field.kind != "FieldDecl" {
+fn is_member_candidate(def: &&SymbolDef) -> bool {
+    matches!(def.kind.as_str(), "FieldDecl" | "CXXMethodDecl")
+}
+
+fn enclosing_record_name_for_member<'a>(
+    index: &'a AstIndex,
+    member: &SymbolDef,
+) -> Option<&'a str> {
+    if !matches!(member.kind.as_str(), "FieldDecl" | "CXXMethodDecl") {
         return None;
     }
 
     index
         .defs
         .iter()
-        .filter(|def| paths_match(&def.file, &field.file))
+        .filter(|def| paths_match(&def.file, &member.file))
         .filter(|def| matches!(def.kind.as_str(), "CXXRecordDecl" | "ClassTemplateSpecializationDecl"))
-        .filter(|def| def.line <= field.line)
+        .filter(|def| def.line <= member.line)
         .max_by_key(|def| def.line)
         .map(|def| def.name.as_str())
+}
+
+fn select_method_overload_for_member_call<'a>(
+    mut methods: Vec<&'a SymbolDef>,
+    source: &str,
+    position: Position,
+    word: &str,
+) -> Option<&'a SymbolDef> {
+    methods.retain(|candidate| candidate.kind == "CXXMethodDecl");
+    if methods.is_empty() {
+        return None;
+    }
+
+    if let Some(argument_count) = extract_call_argument_count(source, position, word) {
+        let arity_matched: Vec<&SymbolDef> = methods
+            .iter()
+            .copied()
+            .filter(|candidate| {
+                method_parameter_count(candidate)
+                    .map(|param_count| param_count == argument_count)
+                    .unwrap_or(true)
+            })
+            .collect();
+        if !arity_matched.is_empty() {
+            methods = arity_matched;
+        }
+    }
+
+    methods.sort_by(|a, b| {
+        method_constness_rank(a)
+            .cmp(&method_constness_rank(b))
+            .then_with(|| a.file.cmp(&b.file))
+            .then_with(|| a.line.cmp(&b.line))
+            .then_with(|| a.col.cmp(&b.col))
+    });
+    methods.first().copied()
+}
+
+fn method_constness_rank(def: &SymbolDef) -> u8 {
+    if def.kind != "CXXMethodDecl" {
+        return 2;
+    }
+
+    let signature = def.qual_type.as_deref().unwrap_or_default();
+    let normalized = signature.trim_end();
+    if normalized.ends_with("const")
+        || normalized.contains(") const")
+        || normalized.contains(" const noexcept")
+    {
+        1
+    } else {
+        0
+    }
+}
+
+fn extract_call_argument_count(source: &str, position: Position, word: &str) -> Option<usize> {
+    let line = source.lines().nth(position.line as usize)?;
+    let chars: Vec<char> = line.chars().collect();
+
+    let mut cursor = position.character as usize;
+    if cursor >= chars.len() {
+        cursor = chars.len().saturating_sub(1);
+    }
+
+    let mut word_start = cursor;
+    while word_start > 0 && is_ident_char(chars[word_start - 1]) {
+        word_start -= 1;
+    }
+    let mut word_end = cursor;
+    while word_end < chars.len() && is_ident_char(chars[word_end]) {
+        word_end += 1;
+    }
+    let token: String = chars[word_start..word_end].iter().collect();
+    if token != word {
+        return None;
+    }
+
+    let mut idx = word_end;
+    while idx < chars.len() && chars[idx].is_whitespace() {
+        idx += 1;
+    }
+    if idx >= chars.len() || chars[idx] != '(' {
+        return None;
+    }
+
+    let mut depth = 0usize;
+    let mut saw_any_argument_token = false;
+    let mut commas = 0usize;
+    for ch in chars[idx..].iter().copied() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                if depth == 0 {
+                    return None;
+                }
+                depth -= 1;
+                if depth == 0 {
+                    return if saw_any_argument_token {
+                        Some(commas + 1)
+                    } else {
+                        Some(0)
+                    };
+                }
+            }
+            ',' if depth == 1 => commas += 1,
+            c if depth == 1 && !c.is_whitespace() => {
+                saw_any_argument_token = true;
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
+fn method_parameter_count(def: &SymbolDef) -> Option<usize> {
+    let signature = def.qual_type.as_deref()?;
+    let start = signature.find('(')?;
+    let mut depth = 0usize;
+    let mut end = None;
+    for (idx, ch) in signature[start..].char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    end = Some(start + idx);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let end = end?;
+    let params = signature[start + 1..end].trim();
+    if params.is_empty() || params == "void" {
+        return Some(0);
+    }
+
+    let mut count = 1usize;
+    let mut nested = 0usize;
+    for ch in params.chars() {
+        match ch {
+            '<' | '(' | '[' => nested += 1,
+            '>' | ')' | ']' => nested = nested.saturating_sub(1),
+            ',' if nested == 0 => count += 1,
+            _ => {}
+        }
+    }
+    Some(count)
 }
 
 fn short_type_name(type_name: &str) -> &str {
@@ -1182,12 +1385,68 @@ fn extract_member_receiver_identifier(source: &str, position: Position, word: &s
     Some(chars[base_start..base_end].iter().collect())
 }
 
+fn extract_namespace_qualifier_before_word(
+    source: &str,
+    position: Position,
+    word: &str,
+) -> Option<String> {
+    let line = source.lines().nth(position.line as usize)?;
+    let chars: Vec<char> = line.chars().collect();
+    if chars.is_empty() {
+        return None;
+    }
+
+    let mut cursor = position.character as usize;
+    if cursor >= chars.len() {
+        cursor = chars.len().saturating_sub(1);
+    }
+
+    let mut word_start = cursor;
+    while word_start > 0 && is_ident_char(chars[word_start - 1]) {
+        word_start -= 1;
+    }
+    let mut word_end = cursor;
+    while word_end < chars.len() && is_ident_char(chars[word_end]) {
+        word_end += 1;
+    }
+    let token: String = chars[word_start..word_end].iter().collect();
+    if token != word {
+        return None;
+    }
+
+    let mut idx = word_start;
+    while idx > 0 && chars[idx - 1].is_whitespace() {
+        idx -= 1;
+    }
+    if idx < 2 || chars[idx - 1] != ':' || chars[idx - 2] != ':' {
+        return None;
+    }
+
+    let mut qualifier_end = idx - 2;
+    while qualifier_end > 0 && chars[qualifier_end - 1].is_whitespace() {
+        qualifier_end -= 1;
+    }
+    if qualifier_end == 0 {
+        return None;
+    }
+
+    let mut qualifier_start = qualifier_end;
+    while qualifier_start > 0 && is_ident_char(chars[qualifier_start - 1]) {
+        qualifier_start -= 1;
+    }
+    if qualifier_start == qualifier_end {
+        return None;
+    }
+
+    Some(chars[qualifier_start..qualifier_end].iter().collect())
+}
+
 fn is_ident_char(ch: char) -> bool {
     ch == '_' || ch.is_ascii_alphanumeric()
 }
 
 fn looks_like_builtin_symbol(word: &str) -> bool {
-    word.starts_with("simd_") || word.starts_with("metal::")
+    word.starts_with("simd_") || word.starts_with("metal::") || lookup_builtin(word).is_some()
 }
 
 fn is_non_navigable_symbol(word: &str) -> bool {
@@ -1197,8 +1456,305 @@ fn is_non_navigable_symbol(word: &str) -> bool {
     )
 }
 
-fn looks_like_project_helper_header(path: &str) -> bool {
-    path.ends_with("bf16_math.h") || path.contains("/common/")
+fn is_builtin_navigation_candidate(word: &str) -> bool {
+    let Some(entry) = lookup_builtin(word) else {
+        return false;
+    };
+    !matches!(entry.kind, BuiltinKind::Keyword | BuiltinKind::Snippet)
+}
+
+fn resolve_fast_system_symbol_location(
+    source: &str,
+    position: Position,
+    word: &str,
+    include_paths: &[String],
+) -> Option<GotoDefinitionResponse> {
+    if let Some(qualifier) = extract_namespace_qualifier_before_word(source, position, word)
+        && is_likely_system_namespace(&qualifier)
+        && let Some(result) = resolve_qualified_system_symbol_location(
+            include_paths,
+            &qualifier,
+            word,
+        )
+    {
+        return Some(result);
+    }
+
+    if !should_fast_lookup_system_symbol(source, position, word) {
+        return None;
+    }
+
+    resolve_system_header_symbol_location(word, include_paths)
+}
+
+fn should_fast_lookup_system_symbol(source: &str, position: Position, word: &str) -> bool {
+    if is_likely_system_symbol_family(word) {
+        return true;
+    }
+
+    if let Some(qualifier) = extract_namespace_qualifier_before_word(source, position, word) {
+        return is_likely_system_namespace(&qualifier);
+    }
+
+    false
+}
+
+fn is_likely_system_symbol_family(word: &str) -> bool {
+    if matches!(
+        word,
+        "mem_flags"
+            | "thread_scope"
+            | "memory_order"
+            | "memory_scope"
+            | "threadgroup_barrier"
+            | "simdgroup_barrier"
+            | "simd_sum"
+    ) {
+        return true;
+    }
+
+    [
+        "simd_",
+        "simdgroup_",
+        "threadgroup_",
+        "quad_",
+        "atomic_",
+        "mem_",
+        "thread_",
+        "intersection_",
+        "visible_",
+    ]
+    .iter()
+    .any(|prefix| word.starts_with(prefix))
+}
+
+fn is_likely_system_namespace(qualifier: &str) -> bool {
+    matches!(
+        qualifier,
+        "metal"
+            | "address"
+            | "coord"
+            | "filter"
+            | "mip_filter"
+            | "compare_func"
+            | "access"
+            | "mem_flags"
+            | "thread_scope"
+            | "memory_order"
+            | "memory_scope"
+    )
+}
+
+fn resolve_builtin_symbol_location(word: &str, include_paths: &[String]) -> Option<GotoDefinitionResponse> {
+    if !is_builtin_navigation_candidate(word) {
+        return None;
+    }
+
+    resolve_system_header_symbol_location(word, include_paths)
+}
+
+fn system_builtin_header_candidates(include_paths: &[String]) -> Vec<PathBuf> {
+    const METAL_HEADER_BASENAMES: &[&str] = &[
+        "metal_stdlib",
+        "metal_compute",
+        "metal_simdgroup",
+        "metal_atomic",
+        "metal_math",
+        "metal_geometric",
+        "metal_types",
+        "metal_common",
+    ];
+
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+
+    for include_path in include_paths {
+        let include_root = PathBuf::from(include_path);
+        let roots = [include_root.clone(), include_root.join("metal")];
+        for root in roots {
+            for basename in METAL_HEADER_BASENAMES {
+                let candidate = normalize_candidate_path(&root.join(basename));
+                if candidate.is_file() && seen.insert(candidate.clone()) {
+                    out.push(candidate);
+                }
+            }
+
+            // Keep this adaptive across toolchain revisions: include any sibling
+            // Metal headers even if Apple adds/renames files beyond the known list.
+            if let Ok(entries) = std::fs::read_dir(&root) {
+                for entry in entries.flatten() {
+                    let candidate = normalize_candidate_path(&entry.path());
+                    if !candidate.is_file() {
+                        continue;
+                    }
+                    let Some(file_name) = candidate.file_name().and_then(|name| name.to_str()) else {
+                        continue;
+                    };
+                    if !file_name.starts_with("metal") {
+                        continue;
+                    }
+                    if seen.insert(candidate.clone()) {
+                        out.push(candidate);
+                    }
+                }
+            }
+        }
+    }
+
+    out
+}
+
+fn resolve_system_header_symbol_location(
+    symbol: &str,
+    include_paths: &[String],
+) -> Option<GotoDefinitionResponse> {
+    for header_path in system_builtin_header_candidates(include_paths) {
+        let Some(range) = find_word_range_in_file(&header_path, symbol) else {
+            continue;
+        };
+        let Ok(uri) = Url::from_file_path(&header_path) else {
+            continue;
+        };
+        return Some(GotoDefinitionResponse::Scalar(Location { uri, range }));
+    }
+
+    None
+}
+
+fn resolve_qualified_system_symbol_location(
+    include_paths: &[String],
+    qualifier: &str,
+    symbol: &str,
+) -> Option<GotoDefinitionResponse> {
+    for header_path in system_builtin_header_candidates(include_paths) {
+        let Some(range) = find_scoped_enum_member_range_in_file(&header_path, qualifier, symbol)
+        else {
+            continue;
+        };
+        let Ok(uri) = Url::from_file_path(&header_path) else {
+            continue;
+        };
+        return Some(GotoDefinitionResponse::Scalar(Location { uri, range }));
+    }
+
+    None
+}
+
+fn normalize_candidate_path(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn find_word_range_in_file(path: &Path, word: &str) -> Option<Range> {
+    let source = std::fs::read_to_string(path).ok()?;
+    let start = find_word_boundary_offset(&source, word)?;
+    let start_pos = byte_offset_to_position(&source, start);
+    let end_pos = byte_offset_to_position(&source, start + word.len());
+    Some(Range::new(start_pos, end_pos))
+}
+
+fn find_word_boundary_offset(source: &str, word: &str) -> Option<usize> {
+    if word.is_empty() {
+        return None;
+    }
+
+    let mut search_from = 0usize;
+    while let Some(local_idx) = source[search_from..].find(word) {
+        let start = search_from + local_idx;
+        let end = start + word.len();
+
+        let prev = source[..start].chars().next_back();
+        let next = source[end..].chars().next();
+        let prev_is_ident = prev.is_some_and(is_ident_char);
+        let next_is_ident = next.is_some_and(is_ident_char);
+        if !prev_is_ident && !next_is_ident {
+            return Some(start);
+        }
+
+        search_from = end;
+    }
+
+    None
+}
+
+fn find_scoped_enum_member_range_in_file(
+    path: &Path,
+    qualifier: &str,
+    symbol: &str,
+) -> Option<Range> {
+    let source = std::fs::read_to_string(path).ok()?;
+    let start = find_scoped_enum_member_offset(&source, qualifier, symbol)?;
+    let start_pos = byte_offset_to_position(&source, start);
+    let end_pos = byte_offset_to_position(&source, start + symbol.len());
+    Some(Range::new(start_pos, end_pos))
+}
+
+fn find_scoped_enum_member_offset(source: &str, qualifier: &str, symbol: &str) -> Option<usize> {
+    if qualifier.is_empty() || symbol.is_empty() {
+        return None;
+    }
+
+    let enum_markers = [
+        format!("enum class {qualifier}"),
+        format!("enum {qualifier}"),
+    ];
+    for marker in enum_markers {
+        let mut search_from = 0usize;
+        while let Some(local_marker_start) = source[search_from..].find(&marker) {
+            let marker_start = search_from + local_marker_start;
+            let after_marker = &source[marker_start + marker.len()..];
+            let Some(open_brace_rel) = after_marker.find('{') else {
+                search_from = marker_start + marker.len();
+                continue;
+            };
+            let body_start = marker_start + marker.len() + open_brace_rel + 1;
+            let Some(body_end) = find_matching_brace(source, body_start - 1) else {
+                search_from = body_start;
+                continue;
+            };
+            let body = &source[body_start..body_end];
+            if let Some(body_offset) = find_word_boundary_offset(body, symbol) {
+                return Some(body_start + body_offset);
+            }
+
+            search_from = body_end + 1;
+        }
+    }
+
+    None
+}
+
+fn find_matching_brace(source: &str, open_brace_offset: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (idx, ch) in source[open_brace_offset..].char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(open_brace_offset + idx);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn byte_offset_to_position(source: &str, byte_offset: usize) -> Position {
+    let mut line = 0u32;
+    let mut col = 0u32;
+    for (idx, ch) in source.char_indices() {
+        if idx >= byte_offset {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            col = 0;
+        } else {
+            col += 1;
+        }
+    }
+    Position::new(line, col)
 }
 
 fn resolve_macro_definition(
@@ -1232,480 +1788,5 @@ fn content_hash(source: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    static AST_DUMP_COUNTER_TEST_LOCK: once_cell::sync::Lazy<std::sync::Mutex<()>> =
-        once_cell::sync::Lazy::new(|| std::sync::Mutex::new(()));
-
-    fn has_metal_compiler() -> bool {
-        std::process::Command::new("xcrun")
-            .args(["--find", "metal"])
-            .output()
-            .is_ok_and(|o| o.status.success())
-    }
-
-    fn position_of(source: &str, needle: &str) -> Position {
-        let idx = source.find(needle).expect("needle must exist");
-        let before = &source[..idx];
-        let line = before.as_bytes().iter().filter(|&&b| b == b'\n').count() as u32;
-        let col = before
-            .rsplit_once('\n')
-            .map(|(_, tail)| tail.chars().count() as u32)
-            .unwrap_or_else(|| before.chars().count() as u32);
-        Position::new(line, col)
-    }
-
-    #[test]
-    fn local_template_parameter_fast_path_resolves_usage() {
-        let source = r#"
-template <typename T, const int BN, const int TM>
-struct Kernel {
-  int value = BN * TM;
-};
-"#;
-        let snapshot = SyntaxTree::parse(source);
-        let uri = Url::parse("file:///tmp/kernel.metal").expect("valid uri");
-        let usage = position_of(source, "BN * TM");
-
-        let result =
-            resolve_local_template_parameter(&uri, &snapshot, source, usage, "BN")
-                .expect("template param should resolve");
-        let GotoDefinitionResponse::Scalar(location) = result else {
-            panic!("expected scalar response");
-        };
-
-        let definition_line = source
-            .lines()
-            .nth(location.range.start.line as usize)
-            .expect("definition line");
-        assert!(
-            definition_line.contains("const int BN"),
-            "expected BN template parameter definition, got line: {definition_line}"
-        );
-    }
-
-    #[test]
-    fn by_name_field_tie_uses_member_receiver_type_to_disambiguate() {
-        let source = r#"
-static METAL_FUNC void run(constant GEMMParams* params) {
-  int gemm_k_iterations = params->gemm_k_iterations_aligned;
-}
-"#;
-        let position = position_of(source, "gemm_k_iterations_aligned");
-        let source_file = "/tmp/gemm.h";
-        let params_file = "/tmp/params.h";
-
-        let defs = vec![
-            SymbolDef {
-                id: "record-gemm".into(),
-                name: "GEMMParams".into(),
-                kind: "CXXRecordDecl".into(),
-                file: params_file.into(),
-                line: 10,
-                col: 8,
-                is_definition: true,
-                type_name: None,
-                qual_type: None,
-            },
-            SymbolDef {
-                id: "field-gemm".into(),
-                name: "gemm_k_iterations_aligned".into(),
-                kind: "FieldDecl".into(),
-                file: params_file.into(),
-                line: 28,
-                col: 13,
-                is_definition: true,
-                type_name: Some("int".into()),
-                qual_type: Some("const int".into()),
-            },
-            SymbolDef {
-                id: "record-splitk".into(),
-                name: "GEMMSpiltKParams".into(),
-                kind: "CXXRecordDecl".into(),
-                file: params_file.into(),
-                line: 33,
-                col: 8,
-                is_definition: true,
-                type_name: None,
-                qual_type: None,
-            },
-            SymbolDef {
-                id: "field-splitk".into(),
-                name: "gemm_k_iterations_aligned".into(),
-                kind: "FieldDecl".into(),
-                file: params_file.into(),
-                line: 49,
-                col: 13,
-                is_definition: true,
-                type_name: Some("int".into()),
-                qual_type: Some("const int".into()),
-            },
-            SymbolDef {
-                id: "parm-params".into(),
-                name: "params".into(),
-                kind: "ParmVarDecl".into(),
-                file: source_file.into(),
-                line: 2,
-                col: 49,
-                is_definition: true,
-                type_name: Some("GEMMParams".into()),
-                qual_type: Some("constant GEMMParams *".into()),
-            },
-        ];
-
-        let mut name_to_defs = std::collections::HashMap::new();
-        name_to_defs.insert("gemm_k_iterations_aligned".to_string(), vec![1, 3]);
-        name_to_defs.insert("params".to_string(), vec![4]);
-
-        let index = AstIndex {
-            defs,
-            refs: Vec::new(),
-            id_to_def: std::collections::HashMap::new(),
-            name_to_defs,
-            target_id_to_refs: std::collections::HashMap::new(),
-            file_to_defs: std::collections::HashMap::new(),
-            file_to_refs: std::collections::HashMap::new(),
-        };
-
-        let result = resolve_by_name(
-            &index,
-            source_file,
-            source,
-            position,
-            "gemm_k_iterations_aligned",
-        )
-        .expect("tie should be disambiguated to GEMMParams field");
-        let GotoDefinitionResponse::Scalar(location) = result else {
-            panic!("expected scalar response");
-        };
-
-        assert!(
-            location.uri.path().ends_with("/tmp/params.h"),
-            "expected params.h target, got {}",
-            location.uri.path()
-        );
-        assert_eq!(location.range.start.line, 27);
-    }
-
-    #[test]
-    fn by_name_field_tie_without_receiver_type_remains_ambiguous() {
-        let source = "int v = ptr->gemm_k_iterations_aligned;";
-        let position = position_of(source, "gemm_k_iterations_aligned");
-        let source_file = "/tmp/gemm.h";
-        let params_file = "/tmp/params.h";
-
-        let defs = vec![
-            SymbolDef {
-                id: "record-gemm".into(),
-                name: "GEMMParams".into(),
-                kind: "CXXRecordDecl".into(),
-                file: params_file.into(),
-                line: 10,
-                col: 8,
-                is_definition: true,
-                type_name: None,
-                qual_type: None,
-            },
-            SymbolDef {
-                id: "field-gemm".into(),
-                name: "gemm_k_iterations_aligned".into(),
-                kind: "FieldDecl".into(),
-                file: params_file.into(),
-                line: 28,
-                col: 13,
-                is_definition: true,
-                type_name: Some("int".into()),
-                qual_type: Some("const int".into()),
-            },
-            SymbolDef {
-                id: "record-splitk".into(),
-                name: "GEMMSpiltKParams".into(),
-                kind: "CXXRecordDecl".into(),
-                file: params_file.into(),
-                line: 33,
-                col: 8,
-                is_definition: true,
-                type_name: None,
-                qual_type: None,
-            },
-            SymbolDef {
-                id: "field-splitk".into(),
-                name: "gemm_k_iterations_aligned".into(),
-                kind: "FieldDecl".into(),
-                file: params_file.into(),
-                line: 49,
-                col: 13,
-                is_definition: true,
-                type_name: Some("int".into()),
-                qual_type: Some("const int".into()),
-            },
-        ];
-
-        let mut name_to_defs = std::collections::HashMap::new();
-        name_to_defs.insert("gemm_k_iterations_aligned".to_string(), vec![1, 3]);
-
-        let index = AstIndex {
-            defs,
-            refs: Vec::new(),
-            id_to_def: std::collections::HashMap::new(),
-            name_to_defs,
-            target_id_to_refs: std::collections::HashMap::new(),
-            file_to_defs: std::collections::HashMap::new(),
-            file_to_refs: std::collections::HashMap::new(),
-        };
-
-        let result = resolve_by_name(
-            &index,
-            source_file,
-            source,
-            position,
-            "gemm_k_iterations_aligned",
-        );
-        assert!(
-            result.is_none(),
-            "without receiver type info, tie should remain ambiguous"
-        );
-    }
-
-    #[test]
-    fn cast_operators_are_non_navigable_symbols() {
-        assert!(is_non_navigable_symbol("static_cast"));
-        assert!(is_non_navigable_symbol("dynamic_cast"));
-        assert!(is_non_navigable_symbol("reinterpret_cast"));
-        assert!(is_non_navigable_symbol("const_cast"));
-        assert!(!is_non_navigable_symbol("AccumType"));
-    }
-
-    #[tokio::test]
-    async fn provide_returns_none_for_static_cast_keyword() {
-        let source = r#"
-kernel void k(device float* sinks [[buffer(0)]], uint tid [[thread_position_in_grid]]) {
-  float value = static_cast<float>(sinks[tid]);
-}
-"#;
-        let uri = Url::parse("file:///tmp/static_cast_keyword.metal").expect("valid uri");
-        let position = position_of(source, "static_cast<float>");
-        let snapshot = SyntaxTree::parse(source);
-        let provider = DefinitionProvider::new();
-
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(1),
-            provider.provide(&uri, position, source, &Vec::new(), &snapshot),
-        )
-        .await
-        .expect("static_cast lookup should not block");
-
-        assert!(
-            result.is_none(),
-            "goto-definition on static_cast should return no symbol location"
-        );
-    }
-
-    #[tokio::test]
-    async fn provide_returns_none_for_control_flow_keyword_without_ast_dump() {
-        let _guard = AST_DUMP_COUNTER_TEST_LOCK
-            .lock()
-            .expect("AST dump test lock should not be poisoned");
-
-        let source = r#"
-kernel void k(device float* sinks [[buffer(0)]], uint tid [[thread_position_in_grid]]) {
-  if (tid > 0) {
-    sinks[tid] = 0.0f;
-  }
-}
-"#;
-        let uri = Url::parse("file:///tmp/if_keyword.metal").expect("valid uri");
-        let position = position_of(source, "if (tid > 0)");
-        let snapshot = SyntaxTree::parse(source);
-        let provider = DefinitionProvider::new();
-        let before = super::super::compiler::ast_dump_counter();
-
-        let result = provider
-            .provide(&uri, position, source, &Vec::new(), &snapshot)
-            .await;
-
-        let after = super::super::compiler::ast_dump_counter();
-        assert!(
-            result.is_none(),
-            "goto-definition on `if` should return no symbol location"
-        );
-        assert_eq!(
-            after - before,
-            0,
-            "language keyword lookup should not trigger AST dump work"
-        );
-    }
-
-    #[tokio::test]
-    async fn concurrent_goto_definition_for_same_file_runs_single_ast_dump() {
-        if !has_metal_compiler() {
-            return;
-        }
-        let _guard = AST_DUMP_COUNTER_TEST_LOCK
-            .lock()
-            .expect("AST dump test lock should not be poisoned");
-
-        let fixtures_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-        let source_path = fixtures_dir.join("functions.metal");
-        let uri = Url::from_file_path(&source_path).expect("fixture URI");
-        let unique_suffix = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("valid clock")
-            .as_nanos();
-        let source = format!(
-            "{}\n// concurrent-goto-def-test-{unique_suffix}\n",
-            std::fs::read_to_string(&source_path).expect("fixture source")
-        );
-        let snapshot = Arc::new(SyntaxTree::parse(&source));
-        let include_paths = Arc::new(vec![fixtures_dir.display().to_string()]);
-        let source = Arc::new(source);
-        let provider = Arc::new(DefinitionProvider::new());
-
-        let cursor = position_of(source.as_str(), "transform(data[id].position");
-        let workers = 8usize;
-        let barrier = Arc::new(tokio::sync::Barrier::new(workers));
-        let before = super::super::compiler::ast_dump_counter();
-
-        let responses = futures::future::join_all((0..workers).map(|_| {
-            let provider = Arc::clone(&provider);
-            let uri = uri.clone();
-            let source = Arc::clone(&source);
-            let include_paths = Arc::clone(&include_paths);
-            let snapshot = Arc::clone(&snapshot);
-            let barrier = Arc::clone(&barrier);
-            async move {
-                barrier.wait().await;
-                provider
-                    .provide(
-                        &uri,
-                        cursor,
-                        source.as_str(),
-                        include_paths.as_slice(),
-                        snapshot.as_ref(),
-                    )
-                    .await
-            }
-        }))
-        .await;
-
-        for response in responses {
-            assert!(
-                response.is_some(),
-                "all rapid navigation requests should resolve definition"
-            );
-        }
-
-        let after = super::super::compiler::ast_dump_counter();
-        assert_eq!(
-            after - before,
-            1,
-            "concurrent jumps on the same document should share one AST dump build"
-        );
-    }
-
-    #[tokio::test]
-    async fn concurrent_index_document_and_provide_share_single_ast_dump() {
-        if !has_metal_compiler() {
-            return;
-        }
-        let _guard = AST_DUMP_COUNTER_TEST_LOCK
-            .lock()
-            .expect("AST dump test lock should not be poisoned");
-
-        let fixtures_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-        let source_path = fixtures_dir.join("functions.metal");
-        let uri = Url::from_file_path(&source_path).expect("fixture URI");
-        let unique_suffix = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("valid clock")
-            .as_nanos();
-        let source = format!(
-            "{}\n// concurrent-index-and-provide-test-{unique_suffix}\n",
-            std::fs::read_to_string(&source_path).expect("fixture source")
-        );
-        let snapshot = Arc::new(SyntaxTree::parse(&source));
-        let include_paths = Arc::new(vec![fixtures_dir.display().to_string()]);
-        let source = Arc::new(source);
-        let provider = Arc::new(DefinitionProvider::new());
-        let cursor = position_of(source.as_str(), "transform(data[id].position");
-        let barrier = Arc::new(tokio::sync::Barrier::new(2));
-        let before = super::super::compiler::ast_dump_counter();
-
-        let index_task = {
-            let provider = Arc::clone(&provider);
-            let uri = uri.clone();
-            let source = Arc::clone(&source);
-            let include_paths = Arc::clone(&include_paths);
-            let barrier = Arc::clone(&barrier);
-            tokio::spawn(async move {
-                barrier.wait().await;
-                provider
-                    .index_document(&uri, source.as_str(), include_paths.as_slice())
-                    .await;
-            })
-        };
-
-        let provide_task = {
-            let provider = Arc::clone(&provider);
-            let uri = uri.clone();
-            let source = Arc::clone(&source);
-            let include_paths = Arc::clone(&include_paths);
-            let snapshot = Arc::clone(&snapshot);
-            let barrier = Arc::clone(&barrier);
-            tokio::spawn(async move {
-                barrier.wait().await;
-                provider
-                    .provide(
-                        &uri,
-                        cursor,
-                        source.as_str(),
-                        include_paths.as_slice(),
-                        snapshot.as_ref(),
-                    )
-                    .await
-            })
-        };
-
-        let _ = index_task.await.expect("index task should not panic");
-        let provide_result = provide_task.await.expect("provide task should not panic");
-        assert!(
-            provide_result.is_some(),
-            "navigation request should still resolve while concurrent indexing runs"
-        );
-
-        let after = super::super::compiler::ast_dump_counter();
-        assert_eq!(
-            after - before,
-            1,
-            "index_document and provide should share one AST dump build for same source hash"
-        );
-    }
-
-    #[test]
-    fn matches_position_accepts_cursor_at_token_end_boundary() {
-        assert!(matches_position(
-            "/tmp/gemm_attention.metal",
-            71,
-            20,
-            10,
-            "/tmp/gemm_attention.metal",
-            71,
-            30,
-        ));
-    }
-
-    #[test]
-    fn matches_position_rejects_cursor_past_token_end_boundary() {
-        assert!(!matches_position(
-            "/tmp/gemm_attention.metal",
-            71,
-            20,
-            10,
-            "/tmp/gemm_attention.metal",
-            71,
-            31,
-        ));
-    }
-
-}
+#[path = "../../tests/src/definition/provider_tests.rs"]
+mod tests;

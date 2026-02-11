@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -189,6 +189,7 @@ pub(crate) struct IndexingSettings {
     pub(crate) enabled: bool,
     pub(crate) concurrency: usize,
     pub(crate) max_file_size_kb: u64,
+    pub(crate) exclude_paths: Vec<String>,
 }
 
 impl Default for IndexingSettings {
@@ -197,6 +198,7 @@ impl Default for IndexingSettings {
             enabled: true,
             concurrency: 1,
             max_file_size_kb: 512,
+            exclude_paths: Vec::new(),
         }
     }
 }
@@ -212,6 +214,9 @@ impl IndexingSettings {
         if let Some(max_file_size_kb) = patch.max_file_size_kb {
             self.max_file_size_kb = max_file_size_kb;
         }
+        if let Some(exclude_paths) = patch.exclude_paths {
+            self.exclude_paths = exclude_paths;
+        }
     }
 
     fn normalize(&mut self) {
@@ -221,6 +226,14 @@ impl IndexingSettings {
         self.max_file_size_kb = self
             .max_file_size_kb
             .clamp(MIN_MAX_FILE_SIZE_KB, MAX_MAX_FILE_SIZE_KB);
+        let mut seen = HashSet::new();
+        self.exclude_paths = self
+            .exclude_paths
+            .iter()
+            .map(|path| path.trim().to_string())
+            .filter(|path| !path.is_empty())
+            .filter(|path| seen.insert(path.clone()))
+            .collect();
     }
 
     pub(crate) fn max_file_size_bytes(&self) -> u64 {
@@ -344,6 +357,7 @@ struct IndexingSettingsPatch {
     enabled: Option<bool>,
     concurrency: Option<usize>,
     max_file_size_kb: Option<u64>,
+    exclude_paths: Option<Vec<String>>,
     #[serde(flatten)]
     _extra: HashMap<String, Value>,
 }
@@ -378,133 +392,5 @@ fn payload_candidates(payload: &Value) -> Vec<Value> {
 }
 
 #[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::*;
-
-    #[test]
-    fn parses_namespaced_payload() {
-        let payload = json!({
-            "metal-analyzer": {
-                "formatting": {
-                    "enabled": false,
-                    "command": "xcrun",
-                    "args": ["clang-format"]
-                },
-                "diagnostics": {
-                    "debounceMs": 1200,
-                    "scope": "workspace"
-                },
-                "indexing": {
-                    "concurrency": 4,
-                    "maxFileSizeKb": 256
-                },
-                "compiler": {
-                    "includePaths": ["/tmp/includes"],
-                    "extraFlags": ["-DMETAL"],
-                    "platform": "ios"
-                },
-                "logging": {
-                    "level": "debug"
-                }
-            }
-        });
-
-        let settings = ServerSettings::from_lsp_payload(Some(&payload));
-        assert!(!settings.formatting.enabled);
-        assert_eq!(settings.formatting.command, "xcrun");
-        assert_eq!(settings.formatting.args, vec!["clang-format"]);
-        assert_eq!(settings.diagnostics.debounce_ms, 1200);
-        assert_eq!(settings.diagnostics.scope, DiagnosticsScope::Workspace);
-        assert_eq!(settings.indexing.concurrency, 4);
-        assert_eq!(settings.indexing.max_file_size_kb, 256);
-        assert_eq!(settings.compiler.include_paths, vec!["/tmp/includes"]);
-        assert_eq!(settings.compiler.extra_flags, vec!["-DMETAL"]);
-        assert_eq!(settings.compiler.platform, CompilerPlatform::Ios);
-        assert_eq!(settings.logging.level, LoggingLevel::Debug);
-    }
-
-    #[test]
-    fn parses_direct_payload() {
-        let payload = json!({
-            "diagnostics": {
-                "onType": false,
-                "onSave": true,
-                "scope": "openFiles"
-            },
-            "indexing": {
-                "enabled": false
-            }
-        });
-
-        let settings = ServerSettings::from_lsp_payload(Some(&payload));
-        assert!(!settings.diagnostics.on_type);
-        assert!(settings.diagnostics.on_save);
-        assert_eq!(settings.diagnostics.scope, DiagnosticsScope::OpenFiles);
-        assert!(!settings.indexing.enabled);
-    }
-
-    #[test]
-    fn clamps_numeric_values() {
-        let payload = json!({
-            "diagnostics": { "debounceMs": 1 },
-            "indexing": { "concurrency": 0, "maxFileSizeKb": 1 }
-        });
-
-        let settings = ServerSettings::from_lsp_payload(Some(&payload));
-        assert_eq!(settings.diagnostics.debounce_ms, MIN_DIAGNOSTIC_DEBOUNCE_MS);
-        assert_eq!(settings.indexing.concurrency, MIN_INDEXING_CONCURRENCY);
-        assert_eq!(settings.indexing.max_file_size_kb, MIN_MAX_FILE_SIZE_KB);
-    }
-
-    #[test]
-    fn preserves_existing_values_when_payload_is_partial() {
-        let base = ServerSettings {
-            formatting: FormattingSettings {
-                command: "custom-format".to_string(),
-                ..FormattingSettings::default()
-            },
-            ..ServerSettings::default()
-        };
-        let payload = json!({
-            "diagnostics": {
-                "debounceMs": 900
-            }
-        });
-
-        let merged = base.merged_with_payload(&payload);
-        assert_eq!(merged.formatting.command, "custom-format");
-        assert_eq!(merged.diagnostics.debounce_ms, 900);
-    }
-
-    #[test]
-    fn diagnostics_scope_defaults_to_open_files() {
-        let settings = ServerSettings::from_lsp_payload(None);
-        assert_eq!(settings.diagnostics.scope, DiagnosticsScope::OpenFiles);
-    }
-
-    #[test]
-    fn compiler_platform_normalizes_case_and_whitespace() {
-        let payload = json!({
-            "compiler": {
-                "platform": "  MaCoS  "
-            }
-        });
-
-        let settings = ServerSettings::from_lsp_payload(Some(&payload));
-        assert_eq!(settings.compiler.platform, CompilerPlatform::Macos);
-    }
-
-    #[test]
-    fn compiler_platform_falls_back_to_auto_for_invalid_values() {
-        let payload = json!({
-            "compiler": {
-                "platform": "visionos"
-            }
-        });
-
-        let settings = ServerSettings::from_lsp_payload(Some(&payload));
-        assert_eq!(settings.compiler.platform, CompilerPlatform::Auto);
-    }
-}
+#[path = "../../tests/src/server/settings_tests.rs"]
+mod tests;

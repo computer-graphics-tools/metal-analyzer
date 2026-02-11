@@ -731,7 +731,12 @@ pub(crate) fn add_raytracing_types(entries: &mut Vec<BuiltinEntry>) {
 
 pub(crate) fn add_misc_types(entries: &mut Vec<BuiltinEntry>) {
     // Other useful types that don't fit categories perfectly
-    let types = ["render_grid_type", "object_grid_type"];
+    let types = [
+        "render_grid_type",
+        "object_grid_type",
+        "mem_flags",
+        "thread_scope",
+    ];
     for t in &types {
         entries.push(BuiltinEntry::typ(t, "Metal type"));
     }
@@ -760,6 +765,26 @@ pub(crate) fn add_builtin_constants(entries: &mut Vec<BuiltinEntry>) {
         ("INT_MIN", "int", "Minimum int value"),
         ("UINT_MAX", "uint", "Maximum uint value"),
         ("CHAR_BIT", "int", "Number of bits in a char"),
+        (
+            "mem_none",
+            "mem_flags",
+            "Memory barrier flag: no memory class selected",
+        ),
+        (
+            "mem_device",
+            "mem_flags",
+            "Memory barrier flag: synchronize device memory",
+        ),
+        (
+            "mem_threadgroup",
+            "mem_flags",
+            "Memory barrier flag: synchronize threadgroup memory",
+        ),
+        (
+            "mem_threadgroup_imageblock",
+            "mem_flags",
+            "Memory barrier flag: synchronize threadgroup imageblock memory",
+        ),
     ];
 
     for (name, detail, doc) in &consts {

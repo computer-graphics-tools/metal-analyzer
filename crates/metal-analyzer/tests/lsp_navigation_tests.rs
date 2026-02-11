@@ -15,6 +15,7 @@ use tower_lsp::lsp_types::{
     WorkDoneProgressParams,
 };
 use tower_lsp::{ClientSocket, LspService};
+use walkdir::WalkDir;
 
 use metal_analyzer::MetalLanguageServer;
 
@@ -172,14 +173,35 @@ fn first_location(resp: GotoDefinitionResponse) -> tower_lsp::lsp_types::Locatio
     }
 }
 
-fn external_uzu_gemm_attention_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../external/uzu/crates/uzu/src/backends/metal/kernel/attention/gemm_attention.metal")
-}
+fn external_attention_fixture_paths() -> Option<(PathBuf, PathBuf)> {
+    let external_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../external");
+    if !external_root.exists() {
+        return None;
+    }
 
-fn external_uzu_attention_header_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../external/uzu/crates/uzu/src/backends/metal/generated/attention.h")
+    let source_path = WalkDir::new(&external_root)
+        .into_iter()
+        .filter_map(Result::ok)
+        .map(|entry| entry.into_path())
+        .find(|path| {
+            let is_metal_file = path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension == "metal");
+            let parent_is_attention_dir = path
+                .parent()
+                .and_then(|parent| parent.file_name())
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name == "attention");
+            is_metal_file && parent_is_attention_dir
+        })?;
+
+    let header_path = source_path.ancestors().find_map(|ancestor| {
+        let candidate = ancestor.join("generated").join("attention.h");
+        candidate.is_file().then_some(candidate)
+    })?;
+
+    Some((source_path, header_path))
 }
 
 #[tokio::test]
@@ -266,19 +288,17 @@ async fn goto_definition_emits_navigation_progress_notifications() {
 }
 
 #[tokio::test]
-async fn goto_definition_resolves_external_uzu_attention_types_and_fields() {
+async fn goto_definition_resolves_external_attention_fixture_types_and_fields() {
     if !has_metal_compiler() {
         return;
     }
 
-    let source_path = external_uzu_gemm_attention_path();
-    let header_path = external_uzu_attention_header_path();
-    if !source_path.exists() || !header_path.exists() {
-        // External uzu fixture is optional in some environments.
+    let Some((source_path, _header_path)) = external_attention_fixture_paths() else {
+        // Optional external fixture may not exist in all environments.
         return;
-    }
+    };
 
-    let source = std::fs::read_to_string(&source_path).expect("read external gemm_attention.metal");
+    let source = std::fs::read_to_string(&source_path).expect("read external attention fixture");
     let uri = Url::from_file_path(&source_path).expect("external fixture URI");
     let position_for = |needle: &str| position_of(&source, needle);
 

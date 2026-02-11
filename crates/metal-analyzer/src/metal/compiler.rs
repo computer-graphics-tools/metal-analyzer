@@ -1,5 +1,5 @@
 use regex::Regex;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
@@ -162,6 +162,97 @@ fn should_exclude_dir(name: &str) -> bool {
     )
 }
 
+fn parse_include_search_paths(raw_output: &str) -> Vec<PathBuf> {
+    let mut parsing_includes = false;
+    let mut discovered_paths = Vec::new();
+
+    for line in raw_output.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("#include <...> search starts here:") {
+            parsing_includes = true;
+            continue;
+        }
+        if !parsing_includes {
+            continue;
+        }
+        if trimmed.starts_with("End of search list.") {
+            break;
+        }
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Clang may annotate framework roots as " (framework directory)".
+        let path_text = trimmed
+            .trim_end_matches(" (framework directory)")
+            .trim_matches('"');
+        if let Some(path) = normalize_existing_path(PathBuf::from(path_text)) {
+            discovered_paths.push(path);
+        }
+    }
+
+    dedupe_existing_paths(discovered_paths)
+}
+
+fn fallback_include_paths_from_toolchain_signature(toolchain_signature: Option<&str>) -> Vec<PathBuf> {
+    let Some(signature) = toolchain_signature else {
+        return Vec::new();
+    };
+
+    let metal_binary = PathBuf::from(signature);
+    let mut discovered_paths = Vec::new();
+
+    if let Some(bin_dir) = metal_binary.parent()
+        && let Some(metal_version_dir) = bin_dir.parent()
+    {
+        // Typical layout:
+        //   .../usr/metal/<version>/bin/metal
+        //   .../usr/metal/<version>/lib/clang/<clang-version>/include
+        discovered_paths.extend(clang_include_dirs_under(&metal_version_dir.join("lib/clang")));
+
+        // Some distributions may expose include directly under lib/clang/include.
+        if let Some(path) = normalize_existing_path(metal_version_dir.join("lib/clang/include")) {
+            discovered_paths.push(path);
+        }
+    }
+
+    dedupe_existing_paths(discovered_paths)
+}
+
+fn clang_include_dirs_under(clang_root: &Path) -> Vec<PathBuf> {
+    let mut include_dirs = Vec::new();
+    let Ok(entries) = std::fs::read_dir(clang_root) else {
+        return include_dirs;
+    };
+
+    for entry in entries.flatten() {
+        let candidate = entry.path().join("include");
+        if let Some(path) = normalize_existing_path(candidate) {
+            include_dirs.push(path);
+        }
+    }
+
+    include_dirs
+}
+
+fn normalize_existing_path(path: PathBuf) -> Option<PathBuf> {
+    if !path.exists() {
+        return None;
+    }
+    Some(path.canonicalize().unwrap_or(path))
+}
+
+fn dedupe_existing_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut seen = HashSet::new();
+    let mut deduped = Vec::new();
+    for path in paths {
+        if seen.insert(path.clone()) {
+            deduped.push(path);
+        }
+    }
+    deduped
+}
+
 /// Represents a parsed diagnostic from the Metal compiler output.
 #[derive(Debug, Clone)]
 pub struct MetalDiagnostic {
@@ -212,6 +303,10 @@ pub struct MetalCompiler {
     /// Serializes first-time include discovery so startup races don't trigger
     /// duplicate discovery calls.
     include_discovery_lock: tokio::sync::Mutex<()>,
+    /// Canonical path to the active `xcrun --find metal` binary.
+    ///
+    /// Used to detect toolchain upgrades while the language server is running.
+    toolchain_signature: RwLock<Option<String>>,
 }
 
 impl Default for MetalCompiler {
@@ -242,12 +337,19 @@ impl MetalCompiler {
             extra_flags: RwLock::new(Vec::new()),
             platform: RwLock::new(CompilerPlatform::Auto),
             include_discovery_lock: tokio::sync::Mutex::new(()),
+            toolchain_signature: RwLock::new(None),
         }
     }
 
     /// Run `xcrun metal -v` to parse default search paths from stderr.
     /// This allows us to resolve `<metal_stdlib>` and other system headers.
     pub async fn discover_system_includes(&self) {
+        let detected_signature = Self::detect_toolchain_signature().await;
+        self.discover_system_includes_with_signature(detected_signature)
+            .await;
+    }
+
+    async fn discover_system_includes_with_signature(&self, detected_signature: Option<String>) {
         let mut command = xcrun_command();
         let output = match command
             .args(["metal", "-v", "-E", "-"]) // -E to preprocess, - to read from stdin
@@ -258,35 +360,27 @@ impl MetalCompiler {
             Ok(o) => o,
             Err(e) => {
                 warn!("Failed to run xcrun metal -v: {e}");
+                if let Some(signature) = detected_signature {
+                    self.store_toolchain_signature(Some(signature));
+                }
                 return;
             }
         };
 
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let mut paths = Vec::new();
-        let mut parsing_includes = false;
-
-        for line in stderr.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("#include <...> search starts here:") {
-                parsing_includes = true;
-                continue;
-            }
-            if parsing_includes {
-                if trimmed.starts_with("End of search list.") {
-                    break;
-                }
-                // Paths are printed with leading space
-                let path_str = trimmed;
-                let path = PathBuf::from(path_str);
-                if path.exists() {
-                    paths.push(path);
-                }
-            }
+        // Different Xcode / toolchain versions can print include search details to
+        // either stderr or stdout, so we parse both streams.
+        let discovery_output = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stderr),
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let mut paths = parse_include_search_paths(&discovery_output);
+        if paths.is_empty() {
+            paths = fallback_include_paths_from_toolchain_signature(detected_signature.as_deref());
         }
 
         if paths.is_empty() {
-            warn!("No system include paths found in `metal -v` output");
+            warn!("No system include paths found in `metal -v` output or fallback heuristics");
         } else {
             debug!("Discovered system include paths: {:?}", paths);
         }
@@ -294,19 +388,23 @@ impl MetalCompiler {
         if let Ok(mut guard) = self.system_include_paths.write() {
             *guard = paths;
         }
+        self.store_toolchain_signature(detected_signature);
     }
 
     /// Ensure system include paths are available before compiling.
     pub async fn ensure_system_includes_ready(&self) {
-        if !self.get_system_include_paths().is_empty() {
+        let detected_signature = Self::detect_toolchain_signature().await;
+        if self.include_cache_is_fresh(detected_signature.as_deref()) {
             return;
         }
 
         let _guard = self.include_discovery_lock.lock().await;
-        if !self.get_system_include_paths().is_empty() {
+        let detected_signature = Self::detect_toolchain_signature().await;
+        if self.include_cache_is_fresh(detected_signature.as_deref()) {
             return;
         }
-        self.discover_system_includes().await;
+        self.discover_system_includes_with_signature(detected_signature)
+            .await;
     }
 
     // ── Configuration ────────────────────────────────────────────────────
@@ -335,6 +433,57 @@ impl MetalCompiler {
             .read()
             .map(|g| g.clone())
             .unwrap_or_default()
+    }
+
+    fn include_cache_is_fresh(&self, detected_signature: Option<&str>) -> bool {
+        let include_paths = self.get_system_include_paths();
+        if include_paths.is_empty() {
+            return false;
+        }
+
+        // If all discovered paths disappeared, likely because the toolchain was
+        // upgraded/replaced while the server is still alive.
+        if include_paths.iter().all(|path| !path.exists()) {
+            return false;
+        }
+
+        let Some(detected_signature) = detected_signature else {
+            return true;
+        };
+        self.cached_toolchain_signature()
+            .is_some_and(|cached_signature| cached_signature == detected_signature)
+    }
+
+    fn cached_toolchain_signature(&self) -> Option<String> {
+        self.toolchain_signature
+            .read()
+            .map(|signature| signature.clone())
+            .unwrap_or(None)
+    }
+
+    fn store_toolchain_signature(&self, signature: Option<String>) {
+        if let Ok(mut guard) = self.toolchain_signature.write() {
+            *guard = signature;
+        }
+    }
+
+    async fn detect_toolchain_signature() -> Option<String> {
+        let mut command = xcrun_command();
+        let output = command.args(["--find", "metal"]).output().await.ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let raw_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if raw_path.is_empty() {
+            return None;
+        }
+        let path = PathBuf::from(raw_path);
+        Some(
+            path.canonicalize()
+                .unwrap_or(path)
+                .display()
+                .to_string(),
+        )
     }
 
     /// Register additional compiler flags (e.g. `-std=metal4.0`, `-DFOO=1`).
@@ -750,388 +899,5 @@ impl Drop for MetalCompiler {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_error_line() {
-        let compiler = MetalCompiler::new();
-        let line = "shader.metal:10:5: error: use of undeclared identifier 'foo'";
-        let diag = compiler.parse_diagnostic_line(line).unwrap();
-
-        assert_eq!(diag.file.as_deref(), Some("shader.metal"));
-        assert_eq!(diag.line, 9); // 0-based
-        assert_eq!(diag.column, 4); // 0-based
-        assert_eq!(diag.severity, DiagnosticSeverity::ERROR);
-        assert_eq!(diag.message, "use of undeclared identifier 'foo'");
-    }
-
-    #[test]
-    fn parse_warning_line() {
-        let compiler = MetalCompiler::new();
-        let line = "/tmp/shader.metal:3:12: warning: unused variable 'x'";
-        let diag = compiler.parse_diagnostic_line(line).unwrap();
-
-        assert_eq!(diag.file.as_deref(), Some("/tmp/shader.metal"));
-        assert_eq!(diag.line, 2);
-        assert_eq!(diag.column, 11);
-        assert_eq!(diag.severity, DiagnosticSeverity::WARNING);
-        assert_eq!(diag.message, "unused variable 'x'");
-    }
-
-    #[test]
-    fn parse_note_line() {
-        let compiler = MetalCompiler::new();
-        let line = "shader.metal:1:1: note: previous definition is here";
-        let diag = compiler.parse_diagnostic_line(line).unwrap();
-
-        assert_eq!(diag.file.as_deref(), Some("shader.metal"));
-        assert_eq!(diag.severity, DiagnosticSeverity::INFORMATION);
-    }
-
-    #[test]
-    fn parse_non_diagnostic_line() {
-        let compiler = MetalCompiler::new();
-        assert!(
-            compiler
-                .parse_diagnostic_line("some random output")
-                .is_none()
-        );
-        assert!(compiler.parse_diagnostic_line("").is_none());
-    }
-
-    #[test]
-    fn include_paths_from_file_uri() {
-        let paths = MetalCompiler::include_paths_from_uri(
-            "file:///Users/dev/project/crates/shaders/src/backends/metal/kernel/matmul/gemm/shaders/test.metal",
-        );
-
-        // The deepest path should come first.
-        assert!(!paths.is_empty());
-        assert_eq!(
-            paths[0],
-            "/Users/dev/project/crates/shaders/src/backends/metal/kernel/matmul/gemm/shaders"
-        );
-
-        // Ancestor chain should include the kernel root.
-        assert!(
-            paths.contains(&"/Users/dev/project/crates/shaders/src/backends/metal/kernel".to_string())
-        );
-
-        // And the project root.
-        assert!(paths.contains(&"/Users/dev/project".to_string()));
-
-        // Every ancestor up to `/` should be present.
-        assert!(paths.contains(&"/".to_string()));
-    }
-
-    #[test]
-    fn include_paths_from_non_file_uri() {
-        let paths = MetalCompiler::include_paths_from_uri("untitled:Untitled-1");
-        assert!(paths.is_empty());
-    }
-
-    #[test]
-    fn include_paths_simple_file() {
-        let paths = MetalCompiler::include_paths_from_uri("file:///Users/dev/shader.metal");
-        assert!(!paths.is_empty());
-        // First entry is the file's own directory.
-        assert_eq!(paths[0], "/Users/dev");
-    }
-
-    #[test]
-    fn diagnostic_to_lsp() {
-        let diag = MetalDiagnostic {
-            file: Some("/tmp/shader.metal".to_string()),
-            line: 5,
-            column: 10,
-            severity: DiagnosticSeverity::ERROR,
-            message: "something went wrong".to_string(),
-        };
-        let lsp = diag.into_lsp_diagnostic();
-        assert_eq!(lsp.range.start.line, 5);
-        assert_eq!(lsp.range.start.character, 10);
-        assert_eq!(lsp.source.as_deref(), Some("metal-compiler"));
-    }
-
-    #[test]
-    fn add_include_paths_and_flags() {
-        let compiler = MetalCompiler::new();
-
-        compiler.add_include_paths(vec![
-            PathBuf::from("/some/path"),
-            PathBuf::from("/another/path"),
-        ]);
-        compiler.add_flags(vec!["-std=metal4.0".to_string(), "-DFOO=1".to_string()]);
-
-        let includes = compiler.extra_include_paths.read().unwrap();
-        assert_eq!(includes.len(), 2);
-        assert_eq!(includes[0], PathBuf::from("/some/path"));
-
-        let flags = compiler.extra_flags.read().unwrap();
-        assert_eq!(flags.len(), 2);
-        assert_eq!(flags[0], "-std=metal4.0");
-    }
-
-    #[test]
-    fn set_replaces_values() {
-        let compiler = MetalCompiler::new();
-        compiler.add_flags(vec!["old".to_string()]);
-        compiler.set_flags(vec!["new".to_string()]);
-
-        let flags = compiler.extra_flags.read().unwrap();
-        assert_eq!(flags.len(), 1);
-        assert_eq!(flags[0], "new");
-    }
-
-    fn as_flags(raw: &[&str]) -> Vec<String> {
-        raw.iter().map(|flag| (*flag).to_string()).collect()
-    }
-
-    #[test]
-    fn auto_injects_macos_define_when_no_platform_context_exists() {
-        let user_flags = as_flags(&["-std=metal3.1"]);
-        let effective = MetalCompiler::build_effective_flags(&user_flags, CompilerPlatform::Auto);
-        assert_eq!(
-            effective,
-            as_flags(&["-std=metal3.1", "-D__METAL_MACOS__"])
-        );
-    }
-
-    #[test]
-    fn explicit_modes_inject_expected_platform_define() {
-        let macos_effective = MetalCompiler::build_effective_flags(&[], CompilerPlatform::Macos);
-        assert_eq!(macos_effective, as_flags(&["-D__METAL_MACOS__"]));
-
-        let ios_effective = MetalCompiler::build_effective_flags(&[], CompilerPlatform::Ios);
-        assert_eq!(ios_effective, as_flags(&["-D__METAL_IOS__"]));
-    }
-
-    #[test]
-    fn none_mode_injects_no_platform_define() {
-        let effective = MetalCompiler::build_effective_flags(
-            &as_flags(&["-std=metal3.1"]),
-            CompilerPlatform::None,
-        );
-        assert_eq!(effective, as_flags(&["-std=metal3.1"]));
-    }
-
-    #[test]
-    fn user_platform_define_prevents_conflicting_injection() {
-        let user_flags = as_flags(&["-D__METAL_IOS__"]);
-        let effective = MetalCompiler::build_effective_flags(&user_flags, CompilerPlatform::Macos);
-        assert_eq!(effective, as_flags(&["-D__METAL_IOS__"]));
-    }
-
-    #[test]
-    fn target_or_sdk_flags_prevent_auto_injection() {
-        let user_flags = as_flags(&["-target", "air64-apple-ios17.0"]);
-        let effective = MetalCompiler::build_effective_flags(&user_flags, CompilerPlatform::Auto);
-        assert_eq!(effective, user_flags);
-    }
-
-    // ── compute_include_paths ───────────────────────────────────────────────
-
-    #[test]
-    #[cfg(any())]
-    fn compute_include_paths_includes_ancestors() {
-        let temp_dir =
-            std::env::temp_dir().join(format!("metal-analyzer-test-{}", std::process::id()));
-        std::fs::create_dir_all(&temp_dir).unwrap();
-        let project = temp_dir.join("project");
-        let src = project.join("src");
-        let shaders = src.join("shaders");
-        std::fs::create_dir_all(&shaders).unwrap();
-
-        let file = shaders.join("test.metal");
-        std::fs::write(&file, "").unwrap();
-
-        let paths = compute_include_paths(&file, None);
-
-        // Should include ancestors: shaders, src, project, temp_dir
-        assert!(paths.contains(&shaders.display().to_string()));
-        assert!(paths.contains(&src.display().to_string()));
-        assert!(paths.contains(&project.display().to_string()));
-
-        std::fs::remove_dir_all(&temp_dir).ok();
-    }
-
-    #[test]
-    #[cfg(any())]
-    fn compute_include_paths_includes_siblings() {
-        let temp_dir =
-            std::env::temp_dir().join(format!("metal-analyzer-test-{}", std::process::id()));
-        std::fs::create_dir_all(&temp_dir).unwrap();
-        let project = temp_dir.join("project");
-        let kernel = project.join("kernel");
-        let generated = project.join("generated");
-        let common = project.join("common");
-        std::fs::create_dir_all(&kernel).unwrap();
-        std::fs::create_dir_all(&generated).unwrap();
-        std::fs::create_dir_all(&common).unwrap();
-
-        let file = kernel.join("test.metal");
-        std::fs::write(&file, "").unwrap();
-
-        let paths = compute_include_paths(&file, Some(&[project.clone()]));
-
-        // Should include sibling directories of project
-        assert!(paths.contains(&generated.display().to_string()));
-        assert!(paths.contains(&common.display().to_string()));
-        assert!(paths.contains(&kernel.display().to_string()));
-
-        std::fs::remove_dir_all(&temp_dir).ok();
-    }
-
-    #[test]
-    #[cfg(any())]
-    fn compute_include_paths_stops_at_workspace_root() {
-        let temp_dir =
-            std::env::temp_dir().join(format!("metal-analyzer-test-{}", std::process::id()));
-        std::fs::create_dir_all(&temp_dir).unwrap();
-        let workspace = temp_dir.join("workspace");
-        let project = workspace.join("project");
-        let deep = project.join("very").join("deep").join("path");
-        std::fs::create_dir_all(&deep).unwrap();
-
-        let file = deep.join("test.metal");
-        std::fs::write(&file, "").unwrap();
-
-        let paths = compute_include_paths(&file, Some(&[workspace.clone()]));
-
-        // Should include workspace and its children, but not temp_dir
-        assert!(paths.contains(&workspace.display().to_string()));
-        assert!(!paths.contains(&temp_dir.display().to_string()));
-
-        std::fs::remove_dir_all(&temp_dir).ok();
-    }
-
-    #[test]
-    #[cfg(any())]
-    fn compute_include_paths_excludes_unwanted_dirs() {
-        let temp_dir =
-            std::env::temp_dir().join(format!("metal-analyzer-test-{}", std::process::id()));
-        std::fs::create_dir_all(&temp_dir).unwrap();
-        let project = temp_dir.join("project");
-        let target = project.join("target");
-        let node_modules = project.join("node_modules");
-        let hidden = project.join(".git");
-        let generated = project.join("generated");
-        std::fs::create_dir_all(&target).unwrap();
-        std::fs::create_dir_all(&node_modules).unwrap();
-        std::fs::create_dir_all(&hidden).unwrap();
-        std::fs::create_dir_all(&generated).unwrap();
-
-        let file = project.join("test.metal");
-        std::fs::write(&file, "").unwrap();
-
-        let paths = compute_include_paths(&file, Some(&[project.clone()]));
-
-        // Should exclude unwanted directories
-        assert!(!paths.contains(&target.display().to_string()));
-        assert!(!paths.contains(&node_modules.display().to_string()));
-        assert!(!paths.contains(&hidden.display().to_string()));
-        // But should include valid siblings
-        assert!(paths.contains(&generated.display().to_string()));
-
-        std::fs::remove_dir_all(&temp_dir).ok();
-    }
-
-    #[test]
-    fn compute_include_paths_most_specific_first() {
-        let temp_dir =
-            std::env::temp_dir().join(format!("metal-analyzer-test-{}", std::process::id()));
-        std::fs::create_dir_all(&temp_dir).unwrap();
-        let project = temp_dir.join("project");
-        let src = project.join("src");
-        let shaders = src.join("shaders");
-        std::fs::create_dir_all(&shaders).unwrap();
-
-        let file = shaders.join("test.metal");
-        std::fs::write(&file, "").unwrap();
-
-        // Provide workspace root to avoid walking to filesystem root
-        let paths = compute_include_paths(&file, Some(&[temp_dir.clone()]));
-
-        // Most specific (deepest) paths should come first
-        assert_eq!(paths.first(), Some(&shaders.display().to_string()));
-        assert!(
-            paths.iter().position(|p| p == &src.display().to_string())
-                < paths
-                    .iter()
-                    .position(|p| p == &project.display().to_string())
-        );
-
-        std::fs::remove_dir_all(&temp_dir).ok();
-    }
-
-    #[tokio::test]
-    async fn header_standalone_vs_owner_tu_context() {
-        if !MetalCompiler::is_available().await {
-            return;
-        }
-
-        let temp_dir = std::env::temp_dir().join(format!(
-            "metal-analyzer-ctx-test-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock drift")
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&temp_dir).expect("temp dir");
-
-        let header = temp_dir.join("utils.h");
-        let owner = temp_dir.join("owner.metal");
-
-        std::fs::write(
-            &header,
-            r#"#include <metal_stdlib>
-using namespace metal;
-APP_FUNC uint helper(uint x) { return x; }
-"#,
-        )
-        .expect("write header");
-        std::fs::write(
-            &owner,
-            r#"#include <metal_stdlib>
-#define APP_FUNC static inline
-#include "utils.h"
-using namespace metal;
-kernel void k(device uint* out [[buffer(0)]], uint id [[thread_position_in_grid]]) {
-  out[id] = helper(id);
-}
-"#,
-        )
-        .expect("write owner");
-
-        let compiler = MetalCompiler::new();
-        compiler.ensure_system_includes_ready().await;
-
-        let include_paths = compute_include_paths(&owner, Some(std::slice::from_ref(&temp_dir)));
-        let owner_uri = format!("file://{}", owner.display());
-        let owner_source = std::fs::read_to_string(&owner).expect("owner source");
-        let owner_diags = compiler
-            .compile_with_include_paths(&owner_source, &owner_uri, &include_paths)
-            .await;
-        assert!(
-            owner_diags.is_empty(),
-            "owner TU compile should be clean, got: {:?}",
-            owner_diags
-        );
-
-        let header_uri = format!("file://{}", header.display());
-        let header_source = std::fs::read_to_string(&header).expect("header source");
-        let header_diags = compiler
-            .compile_with_include_paths(&header_source, &header_uri, &include_paths)
-            .await;
-        assert!(
-            header_diags
-                .iter()
-                .any(|d| d.message.contains("APP_FUNC") || d.message.contains("unknown type name")),
-            "standalone header compile should expose context error, got: {:?}",
-            header_diags
-        );
-
-        std::fs::remove_dir_all(&temp_dir).ok();
-    }
-}
+#[path = "../../tests/src/metal/compiler_tests.rs"]
+mod tests;

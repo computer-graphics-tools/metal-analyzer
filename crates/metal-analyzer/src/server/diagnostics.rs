@@ -178,7 +178,11 @@ impl BackgroundHandle {
 
         self.compiler.ensure_system_includes_ready().await;
         let max_indexed_file_size = settings.indexing.max_file_size_bytes();
-        let metal_files = self.discover_metal_files(max_indexed_file_size);
+        let excluded_prefixes = build_workspace_scan_exclude_prefixes(
+            &self.workspace_roots,
+            &settings.indexing.exclude_paths,
+        );
+        let metal_files = self.discover_metal_files(max_indexed_file_size, &excluded_prefixes);
         let total = metal_files.len();
         if total == 0 {
             info!("No .metal files found in workspace");
@@ -338,7 +342,11 @@ impl BackgroundHandle {
         progress.end(Some(end_message)).await;
     }
 
-    fn discover_metal_files(&self, max_file_size_bytes: u64) -> Vec<PathBuf> {
+    fn discover_metal_files(
+        &self,
+        max_file_size_bytes: u64,
+        excluded_prefixes: &[PathBuf],
+    ) -> Vec<PathBuf> {
         let mut files = Vec::new();
         let mut seen = std::collections::HashSet::new();
 
@@ -346,7 +354,9 @@ impl BackgroundHandle {
             for entry in WalkDir::new(root)
                 .follow_links(true)
                 .into_iter()
-                .filter_entry(should_descend_into_workspace_entry)
+                .filter_entry(|entry| {
+                    should_descend_into_workspace_entry(entry, excluded_prefixes)
+                })
                 .filter_map(|e| e.ok())
             {
                 if !entry.file_type().is_file() {
@@ -369,7 +379,7 @@ impl BackgroundHandle {
                     continue;
                 }
 
-                let normalized = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+                let normalized = normalize_path(path);
                 if seen.insert(normalized.clone()) {
                     files.push(normalized);
                 }
@@ -446,7 +456,12 @@ async fn publish_workspace_diagnostics_for_file(
     }
 }
 
-fn should_descend_into_workspace_entry(entry: &DirEntry) -> bool {
+fn should_descend_into_workspace_entry(entry: &DirEntry, excluded_prefixes: &[PathBuf]) -> bool {
+    let normalized = normalize_path(entry.path());
+    if is_path_excluded(&normalized, excluded_prefixes) {
+        return false;
+    }
+
     if !entry.file_type().is_dir() {
         return true;
     }
@@ -467,6 +482,40 @@ fn should_descend_into_workspace_entry(entry: &DirEntry) -> bool {
         name,
         "target" | "build" | "node_modules" | "out" | "bin" | "obj" | "DerivedData"
     )
+}
+
+fn build_workspace_scan_exclude_prefixes(
+    workspace_roots: &[PathBuf],
+    exclude_paths: &[String],
+) -> Vec<PathBuf> {
+    let mut excluded_prefixes = Vec::new();
+    let mut seen = HashSet::new();
+
+    for raw_path in exclude_paths {
+        let exclude_path = PathBuf::from(raw_path);
+        if exclude_path.is_absolute() {
+            let normalized = normalize_path(&exclude_path);
+            if seen.insert(normalized.clone()) {
+                excluded_prefixes.push(normalized);
+            }
+            continue;
+        }
+
+        for workspace_root in workspace_roots {
+            let normalized = normalize_path(&workspace_root.join(&exclude_path));
+            if seen.insert(normalized.clone()) {
+                excluded_prefixes.push(normalized);
+            }
+        }
+    }
+
+    excluded_prefixes
+}
+
+fn is_path_excluded(path: &Path, excluded_prefixes: &[PathBuf]) -> bool {
+    excluded_prefixes
+        .iter()
+        .any(|excluded_prefix| path.starts_with(excluded_prefix))
 }
 
 /// Compute include paths for a file during project scanning.
@@ -786,216 +835,5 @@ fn is_latest_diagnostic_generation(generations: &DashMap<Url, u64>, uri: &Url, v
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn diagnostics_generation_drops_stale_results() {
-        let generations = DashMap::new();
-        let uri = Url::parse("file:///tmp/shader.metal").expect("valid url");
-
-        let first = next_diagnostic_generation(&generations, &uri);
-        assert_eq!(first, 1);
-        assert!(is_latest_diagnostic_generation(&generations, &uri, first));
-
-        let second = next_diagnostic_generation(&generations, &uri);
-        assert_eq!(second, 2);
-        assert!(!is_latest_diagnostic_generation(&generations, &uri, first));
-        assert!(is_latest_diagnostic_generation(&generations, &uri, second));
-    }
-
-    #[test]
-    fn diagnostics_generation_is_per_file() {
-        let generations = DashMap::new();
-        let a = Url::parse("file:///tmp/a.metal").expect("valid url");
-        let b = Url::parse("file:///tmp/b.metal").expect("valid url");
-
-        let a1 = next_diagnostic_generation(&generations, &a);
-        let b1 = next_diagnostic_generation(&generations, &b);
-        assert_eq!(a1, 1);
-        assert_eq!(b1, 1);
-
-        let a2 = next_diagnostic_generation(&generations, &a);
-        assert_eq!(a2, 2);
-        assert!(is_latest_diagnostic_generation(&generations, &a, a2));
-        assert!(is_latest_diagnostic_generation(&generations, &b, b1));
-    }
-
-    #[test]
-    fn filter_target_diagnostics_drops_non_target_in_strict_mode() {
-        let target = std::path::Path::new("/tmp/header.h");
-        let diagnostics = vec![
-            MetalDiagnostic {
-                file: Some("/tmp/header.h".to_string()),
-                line: 1,
-                column: 1,
-                severity: DiagnosticSeverity::ERROR,
-                message: "header error".to_string(),
-            },
-            MetalDiagnostic {
-                file: Some("/tmp/owner.metal".to_string()),
-                line: 2,
-                column: 1,
-                severity: DiagnosticSeverity::ERROR,
-                message: "owner error".to_string(),
-            },
-        ];
-
-        let filtered = filter_target_diagnostics(diagnostics, Some(target), true);
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].message, "header error");
-    }
-
-    #[test]
-    fn filter_target_diagnostics_keeps_unknown_file_in_non_strict_mode() {
-        let target = std::path::Path::new("/tmp/file.metal");
-        let diagnostics = vec![MetalDiagnostic {
-            file: None,
-            line: 0,
-            column: 0,
-            severity: DiagnosticSeverity::ERROR,
-            message: "compiler failed".to_string(),
-        }];
-
-        let filtered = filter_target_diagnostics(diagnostics, Some(target), false);
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].message, "compiler failed");
-    }
-
-    #[test]
-    fn filter_target_diagnostics_drops_ambiguous_relative_header_path() {
-        let target = std::path::Path::new("/tmp/project/include/utils.h");
-        let diagnostics = vec![MetalDiagnostic {
-            file: Some("utils.h".to_string()),
-            line: 1,
-            column: 1,
-            severity: DiagnosticSeverity::ERROR,
-            message: "unknown type name 'METAL_FUNC'".to_string(),
-        }];
-
-        let filtered = filter_target_diagnostics(diagnostics, Some(target), true);
-        assert!(
-            filtered.is_empty(),
-            "relative basename-only file paths must not be attributed to an arbitrary header",
-        );
-    }
-
-    #[test]
-    fn diagnostic_paths_match_accepts_equivalent_absolute_paths() {
-        assert!(diagnostic_paths_match(
-            "/tmp/project/dir/../include/utils.h",
-            "/tmp/project/include/utils.h",
-        ));
-    }
-
-    #[test]
-    fn filter_attaches_cross_file_note_as_related_info() {
-        let target = std::path::Path::new("/tmp/gemv.metal");
-        let diagnostics = vec![
-            MetalDiagnostic {
-                file: Some("/tmp/gemv.metal".to_string()),
-                line: 13,
-                column: 8,
-                severity: DiagnosticSeverity::WARNING,
-                message: "warning from primary file".to_string(),
-            },
-            MetalDiagnostic {
-                file: Some("/tmp/defines.h".to_string()),
-                line: 3,
-                column: 8,
-                severity: DiagnosticSeverity::INFORMATION,
-                message: "related note".to_string(),
-            },
-        ];
-
-        let filtered = filter_target_diagnostics(diagnostics, Some(target), false);
-        assert_eq!(filtered.len(), 1, "only the primary warning should appear");
-        assert_eq!(filtered[0].message, "warning from primary file");
-
-        let related = filtered[0]
-            .related_information
-            .as_ref()
-            .expect("note should be attached as related_information");
-        assert_eq!(related.len(), 1);
-        assert_eq!(related[0].message, "related note");
-        assert!(
-            related[0].location.uri.path().ends_with("defines.h"),
-            "related info should point to the note's file"
-        );
-    }
-
-    #[test]
-    fn filter_suppresses_macro_redefinition_warning_and_following_note() {
-        let target = std::path::Path::new("/tmp/gemv.metal");
-        let diagnostics = vec![
-            MetalDiagnostic {
-                file: Some("/tmp/gemv.metal".to_string()),
-                line: 13,
-                column: 8,
-                severity: DiagnosticSeverity::WARNING,
-                message: "'MTL_CONST' macro redefined [-Wmacro-redefined]".to_string(),
-            },
-            MetalDiagnostic {
-                file: Some("/tmp/defines.h".to_string()),
-                line: 3,
-                column: 8,
-                severity: DiagnosticSeverity::INFORMATION,
-                message: "previous definition is here".to_string(),
-            },
-        ];
-
-        let filtered = filter_target_diagnostics(diagnostics, Some(target), false);
-        assert!(
-            filtered.is_empty(),
-            "macro redefinition warning and trailing note should be suppressed"
-        );
-    }
-
-    #[test]
-    fn filter_drops_orphan_note_without_primary() {
-        let target = std::path::Path::new("/tmp/shader.metal");
-        let diagnostics = vec![MetalDiagnostic {
-            file: Some("/tmp/other.h".to_string()),
-            line: 5,
-            column: 1,
-            severity: DiagnosticSeverity::INFORMATION,
-            message: "expanded from macro".to_string(),
-        }];
-
-        let filtered = filter_target_diagnostics(diagnostics, Some(target), false);
-        assert!(
-            filtered.is_empty(),
-            "orphan note with no preceding primary should not appear"
-        );
-    }
-
-    #[test]
-    fn filter_keeps_primary_when_note_has_relative_path() {
-        let target = std::path::Path::new("/tmp/shader.metal");
-        let diagnostics = vec![
-            MetalDiagnostic {
-                file: Some("/tmp/shader.metal".to_string()),
-                line: 10,
-                column: 1,
-                severity: DiagnosticSeverity::WARNING,
-                message: "some warning".to_string(),
-            },
-            MetalDiagnostic {
-                file: Some("relative.h".to_string()),
-                line: 1,
-                column: 1,
-                severity: DiagnosticSeverity::INFORMATION,
-                message: "note about it".to_string(),
-            },
-        ];
-
-        let filtered = filter_target_diagnostics(diagnostics, Some(target), false);
-        assert_eq!(filtered.len(), 1, "warning should be kept");
-        assert_eq!(filtered[0].message, "some warning");
-        // Relative path cannot be converted to a file:// URI, so no related info.
-        assert!(
-            filtered[0].related_information.is_none(),
-            "relative note path should be silently skipped"
-        );
-    }
-}
+#[path = "../../tests/src/server/diagnostics_tests.rs"]
+mod tests;

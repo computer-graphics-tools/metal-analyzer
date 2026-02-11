@@ -65,7 +65,7 @@ bun run package
    - Available groups:
    - `metal-analyzer.formatting.*` (formatter command/options; style is always read from `.clang-format`)
    - `metal-analyzer.diagnostics.*` (on-type/on-save/debounce/scope)
-   - `metal-analyzer.indexing.*` (background indexing controls)
+   - `metal-analyzer.indexing.*` (background indexing controls, including `excludePaths` for folder/file scan exclusions)
    - `metal-analyzer.compiler.*` (extra include paths, platform context, and compiler flags)
    - `metal-analyzer.logging.level` (error/warn/info/debug/trace)
 

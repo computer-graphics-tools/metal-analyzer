@@ -4,6 +4,7 @@ mod keywords;
 mod types;
 
 #[cfg(test)]
+#[path = "../../../tests/src/metal/builtins_tests.rs"]
 mod tests;
 
 pub use self::database::{all, lookup};
