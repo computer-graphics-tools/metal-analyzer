@@ -125,9 +125,23 @@ jobs:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: bun x @vscode/vsce publish --pat "${VSCE_PAT}"
 
+      - name: Publish stable extension to OpenVSX
+        if: ${{ !github.event.release.prerelease }}
+        working-directory: editors/vscode
+        env:
+          OPENVSX_TOKEN: ${{ secrets.OPENVSX_TOKEN }}
+        run: bun x ovsx publish -p "${OPENVSX_TOKEN}"
+
       - name: Publish pre-release extension
         if: ${{ github.event.release.prerelease }}
         working-directory: editors/vscode
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: bun x @vscode/vsce publish --pre-release --pat "${VSCE_PAT}"
+
+      - name: Publish pre-release extension to OpenVSX
+        if: ${{ github.event.release.prerelease }}
+        working-directory: editors/vscode
+        env:
+          OPENVSX_TOKEN: ${{ secrets.OPENVSX_TOKEN }}
+        run: bun x ovsx publish --pre-release -p "${OPENVSX_TOKEN}"

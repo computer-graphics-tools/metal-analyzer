@@ -2,7 +2,7 @@
   "name": "metal-analyzer",
   "displayName": "Metal Shading Language",
   "description": "Language support for Apple's Metal Shading Language via metal-analyzer",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "eugenebokhan",
   "license": "MIT",
   "repository": {
