@@ -96,26 +96,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: editors/vscode/package.json
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Install extension dependencies
         working-directory: editors/vscode
-        run: npm install
+        run: bun install --frozen-lockfile
 
       - name: Compile extension
         working-directory: editors/vscode
-        run: npm run compile
+        run: bun run compile
 
       - name: Verify release tag matches extension version
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          EXT_VERSION="$(node -p "require('./editors/vscode/package.json').version")"
+          EXT_VERSION="$(bun -e "console.log(require('./editors/vscode/package.json').version)")"
           TAG_VERSION="${RELEASE_TAG#v}"
           if [ "${EXT_VERSION}" != "${TAG_VERSION}" ]; then
             echo "Release tag (${RELEASE_TAG}) does not match editors/vscode/package.json version (${EXT_VERSION})."
@@ -127,11 +123,11 @@ jobs:
         working-directory: editors/vscode
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: npx vsce publish --pat "${VSCE_PAT}"
+        run: bun x @vscode/vsce publish --pat "${VSCE_PAT}"
 
       - name: Publish pre-release extension
         if: ${{ github.event.release.prerelease }}
         working-directory: editors/vscode
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: npx vsce publish --pre-release --pat "${VSCE_PAT}"
+        run: bun x @vscode/vsce publish --pre-release --pat "${VSCE_PAT}"

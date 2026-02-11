@@ -7,7 +7,7 @@ A fast, robust Language Server Protocol implementation for Apple's **Metal Shadi
 - **macOS** (required for the Metal compiler toolchain)
 - **Rust** (to build from source)
 - **Zed** or **VS Code**
-- **Node.js + npm** (only for building the VS Code extension)
+- **Bun** (only for building the VS Code extension)
 
 ## Installation
 
@@ -42,18 +42,9 @@ You can install the extension locally from this repository as a `.vsix` package.
 
 ```bash
 cd editors/vscode
-npm install
-npm run compile
-npm run package
-```
-
-If you use `pnpm`, run:
-
-```bash
-cd editors/vscode
-pnpm install
-pnpm run compile
-pnpm run package
+bun install
+bun run compile
+bun run package
 ```
 
 1. Install the generated `.vsix` in VS Code:
@@ -87,9 +78,9 @@ Quick verification:
 
 Troubleshooting:
 
-- If packaging fails with `npm list --production` / `ELSPROBLEMS`, reinstall deps and re-run packaging:
+- If packaging fails due dependency resolution issues, reinstall deps and re-run packaging:
   - `rm -rf editors/vscode/node_modules`
-  - `cd editors/vscode && npm install && npm run package`
+  - `cd editors/vscode && bun install && bun run package`
 - If `.metal` files show `C/C++` diagnostics in VS Code, remove conflicting associations such as `"files.associations": { "*.metal": "cpp" }` and keep language mode set to `Metal`. See `editors/vscode/README.md` for diagnostics source guidance.
 
 ## Features
