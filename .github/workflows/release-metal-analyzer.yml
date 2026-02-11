@@ -125,19 +125,48 @@ jobs:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: bun x @vscode/vsce publish --pat "${VSCE_PAT}"
 
-      - name: Publish stable extension to OpenVSX
-        if: ${{ !github.event.release.prerelease }}
-        working-directory: editors/vscode
-        env:
-          OPENVSX_TOKEN: ${{ secrets.OPENVSX_TOKEN }}
-        run: bun x ovsx publish -p "${OPENVSX_TOKEN}"
-
       - name: Publish pre-release extension
         if: ${{ github.event.release.prerelease }}
         working-directory: editors/vscode
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: bun x @vscode/vsce publish --pre-release --pat "${VSCE_PAT}"
+
+  publish-openvsx-extension:
+    name: Publish OpenVSX extension
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install extension dependencies
+        working-directory: editors/vscode
+        run: bun install --frozen-lockfile
+
+      - name: Compile extension
+        working-directory: editors/vscode
+        run: bun run compile
+
+      - name: Verify release tag matches extension version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          EXT_VERSION="$(bun -e "console.log(require('./editors/vscode/package.json').version)")"
+          TAG_VERSION="${RELEASE_TAG#v}"
+          if [ "${EXT_VERSION}" != "${TAG_VERSION}" ]; then
+            echo "Release tag (${RELEASE_TAG}) does not match editors/vscode/package.json version (${EXT_VERSION})."
+            exit 1
+          fi
+
+      - name: Publish stable extension to OpenVSX
+        if: ${{ !github.event.release.prerelease }}
+        working-directory: editors/vscode
+        env:
+          OPENVSX_TOKEN: ${{ secrets.OPENVSX_TOKEN }}
+        run: bun x ovsx publish -p "${OPENVSX_TOKEN}"
 
       - name: Publish pre-release extension to OpenVSX
         if: ${{ github.event.release.prerelease }}

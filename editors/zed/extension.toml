@@ -1,6 +1,6 @@
 id = "metal"
 name = "Metal Shading Language"
-version = "0.1.2"
+version = "0.1.3"
 schema_version = 1
 description = "Metal Shading Language support with metal-analyzer - Enhanced syntax highlighting and fast navigation"
 authors = ["Eugene Bokhan <eugenebokhan@icloud.com>"]
