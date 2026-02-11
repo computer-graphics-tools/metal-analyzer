@@ -1,0 +1,16 @@
+id = "metal"
+name = "Metal Shading Language"
+version = "0.1.1"
+schema_version = 1
+description = "Metal Shading Language support with metal-analyzer - Enhanced syntax highlighting and fast navigation"
+authors = ["Eugene Bokhan <eugenebokhan@icloud.com>"]
+repository = "https://github.com/computer-graphics-tools/metal-analyzer"
+icon_path = "../../resources/icon.png"
+
+[language_servers.metal-analyzer]
+name = "Metal Analyzer"
+languages = ["Metal"]
+
+[grammars.cpp]
+repository = "https://github.com/tree-sitter/tree-sitter-cpp"
+commit = "12bd6f7e96080d2e70ec51d4068f2f66120dde35"
