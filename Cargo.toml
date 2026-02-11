@@ -1,0 +1,48 @@
+[workspace]
+members = ["crates/metal-analyzer", "editors/zed"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.1"
+edition = "2024"
+license = "MIT"
+authors = ["Eugene Bokhan <eugenebokhan@icloud.com>"]
+repository = "https://github.com/computer-graphics-tools/metal-analyzer"
+
+[workspace.dependencies]
+# LSP framework
+tower-lsp = "0.20"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Clang AST deserialization
+clang-ast = "0.1"
+
+# CLI argument parsing
+clap = { version = "4", features = ["derive"] }
+
+# Regex for parsing compiler diagnostics
+regex = "1"
+
+# Logging / tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+
+# Concurrent data structures
+dashmap = "6"
+once_cell = "1"
+
+# Zed extension API
+zed_extension_api = "0.7.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
