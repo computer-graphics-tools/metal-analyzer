@@ -13,13 +13,17 @@
 //! token.end(Some("done".into())).await;
 //! ```
 
-use tower_lsp::Client;
-use tower_lsp::lsp_types::*;
-use tracing::debug;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::{
+    panic::AssertUnwindSafe,
+    sync::atomic::{AtomicU64, Ordering},
+};
+
+use futures::FutureExt;
+use tower_lsp::{Client, lsp_types::*};
+use tracing::{debug, warn};
 
 static NEXT_PROGRESS_ID: AtomicU64 = AtomicU64::new(1);
-const PROGRESS_TITLE_PREFIX: &str = "Metal Analyzer:";
+const PROGRESS_TITLE_PREFIX: &str = "metal-analyzer:";
 
 /// A handle to an active work-done progress session.
 ///
@@ -28,11 +32,11 @@ const PROGRESS_TITLE_PREFIX: &str = "Metal Analyzer:";
 /// `Begin` notification.  Call [`report`](Self::report) for intermediate
 /// updates, and [`end`](Self::end) when the operation completes.
 ///
-/// `end` consumes `self` so that further updates on a finished token are
-/// a compile-time error.
+/// If dropped without calling `end`, the `Drop` impl sends a fire-and-forget
+/// `End` notification so the editor never shows a stuck progress indicator.
 pub struct ProgressToken {
-    client: Client,
-    token: NumberOrString,
+    client: Option<Client>,
+    token: Option<NumberOrString>,
 }
 
 impl ProgressToken {
@@ -43,40 +47,61 @@ impl ProgressToken {
     ///
     /// If the create request fails (e.g. the editor doesn't support it),
     /// the begin notification is still sent — most editors tolerate this.
-    pub async fn begin(client: &Client, title: &str, message: Option<String>) -> Self {
+    pub async fn begin(
+        client: &Client,
+        title: &str,
+        message: Option<String>,
+    ) -> Self {
         let id = NEXT_PROGRESS_ID.fetch_add(1, Ordering::Relaxed);
         let token = NumberOrString::String(format!("metalAnalyzer/{title}/{id}"));
         let display_title = prefixed_progress_title(title);
 
-        let create_result = client
-            .send_request::<request::WorkDoneProgressCreate>(WorkDoneProgressCreateParams {
+        let create_result =
+            AssertUnwindSafe(client.send_request::<request::WorkDoneProgressCreate>(WorkDoneProgressCreateParams {
                 token: token.clone(),
-            })
+            }))
+            .catch_unwind()
             .await;
 
-        if let Err(e) = create_result {
-            debug!("workDoneProgress/create failed (editor may not support it): {e}");
+        match create_result {
+            Ok(Err(error)) => {
+                debug!("workDoneProgress/create failed (editor may not support it): {error}");
+            },
+            Err(_) => {
+                warn!("workDoneProgress/create panicked (client may have disconnected)");
+                return Self {
+                    client: None,
+                    token: None,
+                };
+            },
+            Ok(Ok(())) => {},
         }
 
-        client
-            .send_notification::<notification::Progress>(ProgressParams {
-                token: token.clone(),
-                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
-                    WorkDoneProgressBegin {
-                        title: display_title.clone(),
-                        cancellable: Some(false),
-                        message,
-                        percentage: None,
-                    },
-                )),
-            })
-            .await;
+        let send_ok = AssertUnwindSafe(client.send_notification::<notification::Progress>(ProgressParams {
+            token: token.clone(),
+            value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(WorkDoneProgressBegin {
+                title: display_title.clone(),
+                cancellable: Some(false),
+                message,
+                percentage: None,
+            })),
+        }))
+        .catch_unwind()
+        .await;
+
+        if send_ok.is_err() {
+            warn!("progress begin notification panicked (client may have disconnected)");
+            return Self {
+                client: None,
+                token: None,
+            };
+        }
 
         debug!("progress begin: {display_title}");
 
         Self {
-            client: client.clone(),
-            token,
+            client: Some(client.clone()),
+            token: Some(token),
         }
     }
 
@@ -84,37 +109,69 @@ impl ProgressToken {
     ///
     /// `percentage` should be in `0..=100`.
     #[allow(dead_code)]
-    pub async fn report(&self, message: Option<String>, percentage: Option<u32>) {
+    pub async fn report(
+        &self,
+        message: Option<String>,
+        percentage: Option<u32>,
+    ) {
         let percentage = percentage.map(|p| p.min(100));
 
-        self.client
-            .send_notification::<notification::Progress>(ProgressParams {
-                token: self.token.clone(),
-                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(
-                    WorkDoneProgressReport {
-                        cancellable: Some(false),
-                        message,
-                        percentage,
-                    },
-                )),
-            })
+        if let (Some(client), Some(token)) = (&self.client, &self.token) {
+            let _ = AssertUnwindSafe(client.send_notification::<notification::Progress>(ProgressParams {
+                token: token.clone(),
+                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Report(WorkDoneProgressReport {
+                    cancellable: Some(false),
+                    message,
+                    percentage,
+                })),
+            }))
+            .catch_unwind()
             .await;
+        }
     }
 
     /// Finish the progress session.
     ///
     /// Consumes `self` so that no further updates can be sent.
-    pub async fn end(self, message: Option<String>) {
-        debug!("progress end: {:?}", self.token);
+    pub async fn end(
+        mut self,
+        message: Option<String>,
+    ) {
+        let Some(client) = self.client.take() else {
+            return;
+        };
+        let Some(token) = self.token.take() else {
+            return;
+        };
 
-        self.client
-            .send_notification::<notification::Progress>(ProgressParams {
-                token: self.token,
-                value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(WorkDoneProgressEnd {
-                    message,
-                })),
-            })
-            .await;
+        debug!("progress end: {token:?}");
+
+        let _ = AssertUnwindSafe(client.send_notification::<notification::Progress>(ProgressParams {
+            token,
+            value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(WorkDoneProgressEnd {
+                message,
+            })),
+        }))
+        .catch_unwind()
+        .await;
+    }
+}
+
+impl Drop for ProgressToken {
+    fn drop(&mut self) {
+        if let (Some(client), Some(token)) = (self.client.take(), self.token.take()) {
+            debug!("progress cancelled (drop): {token:?}");
+            tokio::spawn(async move {
+                let _ = AssertUnwindSafe(client.send_notification::<notification::Progress>(ProgressParams {
+                    token,
+                    value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(WorkDoneProgressEnd {
+                        message: Some("Cancelled".to_string()),
+                    })),
+                }))
+                .catch_unwind()
+                .await;
+            });
+        }
     }
 }
 

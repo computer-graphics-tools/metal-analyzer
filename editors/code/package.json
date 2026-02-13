@@ -1,0 +1,257 @@
+{
+  "name": "metal-analyzer",
+  "displayName": "metal-analyzer",
+  "description": "Metal language support via metal-analyzer",
+  "version": "0.1.4",
+  "publisher": "eugenebokhan",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/computer-graphics-tools/metal-analyzer"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "metal",
+    "shader",
+    "gpu",
+    "msl",
+    "apple"
+  ],
+  "icon": "icon.png",
+  "activationEvents": [
+    "onLanguage:metal"
+  ],
+  "main": "./out/extension.js",
+  "files": [
+    "LICENSE",
+    "README.md",
+    "language-configuration.json",
+    "out/**",
+    "node_modules/vscode-languageclient/**",
+    "node_modules/balanced-match/**",
+    "node_modules/semver/**",
+    "node_modules/vscode-languageserver-protocol/**",
+    "node_modules/vscode-jsonrpc/**",
+    "node_modules/vscode-languageserver-types/**",
+    "syntaxes/**"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "metal-analyzer.startServer",
+        "title": "metal-analyzer: Start Server"
+      },
+      {
+        "command": "metal-analyzer.stopServer",
+        "title": "metal-analyzer: Stop Server"
+      },
+      {
+        "command": "metal-analyzer.restartServer",
+        "title": "metal-analyzer: Restart Server"
+      },
+      {
+        "command": "metal-analyzer.showOutput",
+        "title": "metal-analyzer: Show Output"
+      },
+      {
+        "command": "metal-analyzer.openLogs",
+        "title": "metal-analyzer: Open Log File"
+      },
+      {
+        "command": "metal-analyzer.serverVersion",
+        "title": "metal-analyzer: Show Server Version"
+      }
+    ],
+    "languages": [
+      {
+        "id": "metal",
+        "aliases": [
+          "Metal",
+          "Metal Shading Language",
+          "MSL"
+        ],
+        "extensions": [
+          ".metal"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "metal",
+        "scopeName": "source.metal",
+        "path": "./syntaxes/metal.tmLanguage.json"
+      }
+    ],
+    "configuration": {
+      "title": "metal-analyzer",
+      "properties": {
+        "metal-analyzer.serverPath": {
+          "type": "string",
+          "default": "metal-analyzer",
+          "markdownDescription": "Path to the metal-analyzer binary. The default value uses PATH first, then auto-downloads the latest macOS release binary."
+        },
+        "$generated-start": true,
+        "metal-analyzer.formatting.enable": {
+          "markdownDescription": "Enable LSP-backed document formatting.",
+          "default": true,
+          "type": "boolean"
+        },
+        "metal-analyzer.formatting.command": {
+          "markdownDescription": "Formatting executable used by metal-analyzer.",
+          "default": "clang-format",
+          "type": "string"
+        },
+        "metal-analyzer.formatting.args": {
+          "markdownDescription": "Additional arguments passed to the formatting command.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "metal-analyzer.diagnostics.onType": {
+          "markdownDescription": "Run diagnostics while typing.",
+          "default": true,
+          "type": "boolean"
+        },
+        "metal-analyzer.diagnostics.onSave": {
+          "markdownDescription": "Run diagnostics when a document is saved.",
+          "default": true,
+          "type": "boolean"
+        },
+        "metal-analyzer.diagnostics.debounceMs": {
+          "markdownDescription": "Debounce delay for on-type diagnostics and background indexing work.",
+          "default": 500,
+          "type": "number",
+          "minimum": 50,
+          "maximum": 5000
+        },
+        "metal-analyzer.diagnostics.scope": {
+          "markdownDescription": "Diagnostics scope. `openFiles` analyzes documents as they are opened/edited/saved. `workspace` also analyzes all `.metal` files in the workspace at startup and when settings change.",
+          "default": "openFiles",
+          "type": "string",
+          "enum": [
+            "openFiles",
+            "workspace"
+          ]
+        },
+        "metal-analyzer.indexing.enable": {
+          "markdownDescription": "Enable background workspace indexing.",
+          "default": true,
+          "type": "boolean"
+        },
+        "metal-analyzer.indexing.concurrency": {
+          "markdownDescription": "Maximum number of concurrent background indexing jobs.",
+          "default": 1,
+          "type": "number",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "metal-analyzer.indexing.maxFileSizeKb": {
+          "markdownDescription": "Skip workspace files larger than this size during background indexing.",
+          "default": 512,
+          "type": "number",
+          "minimum": 16,
+          "maximum": 65536
+        },
+        "metal-analyzer.indexing.projectGraphDepth": {
+          "markdownDescription": "Maximum include-graph traversal depth for scoped cross-file go-to-definition fallback.",
+          "default": 3,
+          "type": "number",
+          "minimum": 0,
+          "maximum": 8
+        },
+        "metal-analyzer.indexing.projectGraphMaxNodes": {
+          "markdownDescription": "Maximum number of graph nodes considered during scoped cross-file go-to-definition fallback.",
+          "default": 256,
+          "type": "number",
+          "minimum": 16,
+          "maximum": 4096
+        },
+        "metal-analyzer.indexing.excludePaths": {
+          "markdownDescription": "Workspace paths to skip during background scanning. Relative paths are resolved from each workspace root; absolute paths are also supported. Excluded folders are skipped for both indexing and workspace-scope diagnostics.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "metal-analyzer.compiler.includePaths": {
+          "markdownDescription": "Extra include directories passed to the Metal compiler.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "metal-analyzer.compiler.extraFlags": {
+          "markdownDescription": "Extra compiler flags passed to `xcrun metal`.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "metal-analyzer.compiler.platform": {
+          "markdownDescription": "Target platform for Metal diagnostics. Determines which platform define (e.g. `__METAL_MACOS__`) is injected unless platform flags are already present in extra flags.",
+          "default": "macos",
+          "type": "string",
+          "enum": [
+            "macos",
+            "ios",
+            "tvos",
+            "watchos",
+            "xros"
+          ]
+        },
+        "metal-analyzer.logging.level": {
+          "markdownDescription": "Runtime logging verbosity for metal-analyzer.",
+          "default": "info",
+          "type": "string",
+          "enum": [
+            "error",
+            "warn",
+            "info",
+            "debug",
+            "trace"
+          ]
+        },
+        "metal-analyzer.threadPool.workerThreads": {
+          "markdownDescription": "Worker thread pool size. `0` uses `available_parallelism`. Requires restart.",
+          "default": 0,
+          "type": "number",
+          "minimum": 0,
+          "maximum": 64
+        },
+        "metal-analyzer.threadPool.formattingThreads": {
+          "markdownDescription": "Formatting thread pool size. Requires restart.",
+          "default": 1,
+          "type": "number",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "$generated-end": true
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "@vscode/vsce": "^3.7.1",
+    "@types/vscode": "^1.75.0",
+    "typescript": "^5.0.0"
+  }
+}

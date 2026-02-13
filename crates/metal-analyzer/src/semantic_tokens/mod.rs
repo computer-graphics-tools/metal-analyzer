@@ -1,10 +1,10 @@
 //! Semantic token provider with two tiers: instant rowan syntactic tokens
 //! and deferred Clang AST semantic tokens that overlay for higher precision.
 
-mod ast_tokens;
-mod mapping;
-mod provider;
-mod syntactic;
+pub(crate) mod ast_tokens;
+pub(crate) mod mapping;
+pub(crate) mod provider;
+pub(crate) mod syntactic;
 
 use tower_lsp::lsp_types::{SemanticToken, SemanticTokenType, SemanticTokensLegend};
 
@@ -72,7 +72,10 @@ impl LineIndex {
         }
     }
 
-    pub(crate) fn line_col(&self, byte_offset: usize) -> (u32, u32) {
+    pub(crate) fn line_col(
+        &self,
+        byte_offset: usize,
+    ) -> (u32, u32) {
         let off = byte_offset;
         let line = match self.line_starts.binary_search(&off) {
             Ok(exact) => exact,
@@ -85,7 +88,10 @@ impl LineIndex {
 
 /// Merge AST tokens into syntactic tokens. AST tokens override syntactic
 /// tokens at the same position (they have higher semantic precision).
-pub(crate) fn merge_tokens(syntactic: &mut Vec<RawToken>, ast: &[RawToken]) {
+pub(crate) fn merge_tokens(
+    syntactic: &mut Vec<RawToken>,
+    ast: &[RawToken],
+) {
     for ast_tok in ast {
         syntactic.retain(|t| !(t.line == ast_tok.line && t.col == ast_tok.col));
         syntactic.push(ast_tok.clone());

@@ -6,10 +6,7 @@ use metal_analyzer::metal::compiler::compute_include_paths;
 use tower_lsp::lsp_types::{Position, Url};
 
 pub fn has_metal_compiler() -> bool {
-    std::process::Command::new("xcrun")
-        .args(["--find", "metal"])
-        .output()
-        .is_ok_and(|output| output.status.success())
+    std::process::Command::new("xcrun").args(["--find", "metal"]).output().is_ok_and(|output| output.status.success())
 }
 
 pub fn fixture_cases_root() -> PathBuf {
@@ -49,11 +46,18 @@ pub fn include_paths_for(relative_path: &str) -> Vec<String> {
     compute_include_paths(&file, Some(&[root]))
 }
 
-pub fn position_of(source: &str, needle: &str) -> Position {
+pub fn position_of(
+    source: &str,
+    needle: &str,
+) -> Position {
     position_of_nth(source, needle, 0)
 }
 
-pub fn position_of_nth(source: &str, needle: &str, nth: usize) -> Position {
+pub fn position_of_nth(
+    source: &str,
+    needle: &str,
+    nth: usize,
+) -> Position {
     assert!(!needle.is_empty(), "needle must not be empty");
     let mut from = 0usize;
     let mut current = 0usize;
@@ -77,8 +81,9 @@ pub fn position_of_nth(source: &str, needle: &str, nth: usize) -> Position {
     }
 }
 
-pub fn line_contains(path: &Path, needle: &str) -> bool {
-    std::fs::read_to_string(path)
-        .ok()
-        .is_some_and(|src| src.lines().any(|line| line.contains(needle)))
+pub fn line_contains(
+    path: &Path,
+    needle: &str,
+) -> bool {
+    std::fs::read_to_string(path).ok().is_some_and(|src| src.lines().any(|line| line.contains(needle)))
 }

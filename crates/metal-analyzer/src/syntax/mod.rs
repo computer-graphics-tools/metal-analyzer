@@ -6,12 +6,12 @@ pub mod kind;
 pub mod lexer;
 pub mod queries;
 
-use dashmap::DashMap;
 use std::sync::Arc;
+
+use dashmap::DashMap;
 use tower_lsp::lsp_types::{Range, Url};
 
-use crate::syntax::cst::SyntaxNode;
-use crate::syntax::cst_parser::Parser;
+use crate::syntax::{cst::SyntaxNode, cst_parser::Parser};
 
 /// Immutable syntax snapshot for parsed documents.
 #[derive(Clone)]
@@ -52,17 +52,27 @@ impl DocumentTrees {
     }
 
     /// Full parse of a document, replacing any existing snapshot.
-    pub fn parse_and_store(&self, uri: &Url, source: &str) {
-        self.snapshots
-            .insert(uri.clone(), SyntaxTree::parse(source));
+    pub fn parse_and_store(
+        &self,
+        uri: &Url,
+        source: &str,
+    ) {
+        self.snapshots.insert(uri.clone(), SyntaxTree::parse(source));
     }
 
-    pub fn insert(&self, uri: Url, tree: SyntaxTree) {
+    pub fn insert(
+        &self,
+        uri: Url,
+        tree: SyntaxTree,
+    ) {
         self.snapshots.insert(uri, tree);
     }
 
     /// Get an Arc-cloned snapshot. No lock held after return.
-    pub fn get(&self, uri: &Url) -> Option<SyntaxTree> {
+    pub fn get(
+        &self,
+        uri: &Url,
+    ) -> Option<SyntaxTree> {
         self.snapshots.get(uri).map(|entry| entry.clone())
     }
 
@@ -78,7 +88,10 @@ impl DocumentTrees {
         self.parse_and_store(uri, new_full_source);
     }
 
-    pub fn remove(&self, uri: &Url) {
+    pub fn remove(
+        &self,
+        uri: &Url,
+    ) {
         self.snapshots.remove(uri);
     }
 }

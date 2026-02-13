@@ -1,5 +1,7 @@
-use crate::syntax::cst::{SyntaxNode, SyntaxToken};
-use crate::syntax::kind::SyntaxKind;
+use crate::syntax::{
+    cst::{SyntaxNode, SyntaxToken},
+    kind::SyntaxKind,
+};
 
 pub trait AstNode: Sized {
     fn cast(syntax: SyntaxNode) -> Option<Self>;
@@ -21,7 +23,9 @@ pub struct Root {
 impl AstNode for Root {
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         if syntax.kind() == SyntaxKind::Root {
-            Some(Self { syntax })
+            Some(Self {
+                syntax,
+            })
         } else {
             None
         }
@@ -40,7 +44,9 @@ pub struct FunctionDef {
 impl AstNode for FunctionDef {
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         if syntax.kind() == SyntaxKind::FunctionDef {
-            Some(Self { syntax })
+            Some(Self {
+                syntax,
+            })
         } else {
             None
         }
@@ -77,7 +83,9 @@ pub struct StructDef {
 impl AstNode for StructDef {
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         if syntax.kind() == SyntaxKind::StructDef {
-            Some(Self { syntax })
+            Some(Self {
+                syntax,
+            })
         } else {
             None
         }
@@ -106,7 +114,9 @@ pub struct ClassDef {
 impl AstNode for ClassDef {
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         if syntax.kind() == SyntaxKind::ClassDef {
-            Some(Self { syntax })
+            Some(Self {
+                syntax,
+            })
         } else {
             None
         }
@@ -131,7 +141,9 @@ pub struct EnumDef {
 impl AstNode for EnumDef {
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         if syntax.kind() == SyntaxKind::EnumDef {
-            Some(Self { syntax })
+            Some(Self {
+                syntax,
+            })
         } else {
             None
         }
@@ -156,7 +168,9 @@ pub struct NamespaceDef {
 impl AstNode for NamespaceDef {
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         if syntax.kind() == SyntaxKind::NamespaceDef {
-            Some(Self { syntax })
+            Some(Self {
+                syntax,
+            })
         } else {
             None
         }
@@ -175,7 +189,9 @@ pub struct TemplateDef {
 impl AstNode for TemplateDef {
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         if syntax.kind() == SyntaxKind::TemplateDef {
-            Some(Self { syntax })
+            Some(Self {
+                syntax,
+            })
         } else {
             None
         }
@@ -200,7 +216,9 @@ pub struct TemplateParameter {
 impl AstNode for TemplateParameter {
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         if syntax.kind() == SyntaxKind::TemplateParameter {
-            Some(Self { syntax })
+            Some(Self {
+                syntax,
+            })
         } else {
             None
         }
@@ -225,7 +243,9 @@ pub struct PreprocDefine {
 impl AstNode for PreprocDefine {
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         if syntax.kind() == SyntaxKind::PreprocDefine {
-            Some(Self { syntax })
+            Some(Self {
+                syntax,
+            })
         } else {
             None
         }
@@ -254,7 +274,9 @@ pub struct VariableDef {
 impl AstNode for VariableDef {
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         if syntax.kind() == SyntaxKind::VariableDef {
-            Some(Self { syntax })
+            Some(Self {
+                syntax,
+            })
         } else {
             None
         }
@@ -279,7 +301,9 @@ pub struct TypedefDef {
 impl AstNode for TypedefDef {
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         if syntax.kind() == SyntaxKind::TypedefDef {
-            Some(Self { syntax })
+            Some(Self {
+                syntax,
+            })
         } else {
             None
         }
@@ -298,7 +322,9 @@ pub struct UsingDef {
 impl AstNode for UsingDef {
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         if syntax.kind() == SyntaxKind::UsingDef {
-            Some(Self { syntax })
+            Some(Self {
+                syntax,
+            })
         } else {
             None
         }
@@ -317,7 +343,9 @@ pub struct FieldDef {
 impl AstNode for FieldDef {
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         if syntax.kind() == SyntaxKind::FieldDef {
-            Some(Self { syntax })
+            Some(Self {
+                syntax,
+            })
         } else {
             None
         }
@@ -342,7 +370,9 @@ pub struct ParameterList {
 impl AstNode for ParameterList {
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         if syntax.kind() == SyntaxKind::ParameterList {
-            Some(Self { syntax })
+            Some(Self {
+                syntax,
+            })
         } else {
             None
         }
@@ -367,7 +397,9 @@ pub struct Parameter {
 impl AstNode for Parameter {
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         if syntax.kind() == SyntaxKind::Parameter {
-            Some(Self { syntax })
+            Some(Self {
+                syntax,
+            })
         } else {
             None
         }
@@ -392,7 +424,9 @@ pub struct Block {
 impl AstNode for Block {
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         if syntax.kind() == SyntaxKind::Block {
-            Some(Self { syntax })
+            Some(Self {
+                syntax,
+            })
         } else {
             None
         }
@@ -411,7 +445,9 @@ pub struct TypeRef {
 impl AstNode for TypeRef {
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         if syntax.kind() == SyntaxKind::TypeRef {
-            Some(Self { syntax })
+            Some(Self {
+                syntax,
+            })
         } else {
             None
         }
@@ -430,7 +466,9 @@ pub struct Attribute {
 impl AstNode for Attribute {
     fn cast(syntax: SyntaxNode) -> Option<Self> {
         if syntax.kind() == SyntaxKind::Attribute {
-            Some(Self { syntax })
+            Some(Self {
+                syntax,
+            })
         } else {
             None
         }

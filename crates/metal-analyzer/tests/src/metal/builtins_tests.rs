@@ -3,11 +3,7 @@ use super::*;
 #[test]
 fn test_builtins_not_empty() {
     assert!(!all().is_empty());
-    assert!(
-        all().len() > 300,
-        "expected > 300 builtins, got {}",
-        all().len()
-    );
+    assert!(all().len() > 300, "expected > 300 builtins, got {}", all().len());
 }
 
 #[test]

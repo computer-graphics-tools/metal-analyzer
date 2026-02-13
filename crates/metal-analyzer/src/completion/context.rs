@@ -1,7 +1,6 @@
-use crate::syntax::cst::SyntaxNode;
-use crate::syntax::helpers;
-use crate::syntax::kind::SyntaxKind;
 use tower_lsp::lsp_types::Position;
+
+use crate::syntax::{cst::SyntaxNode, helpers, kind::SyntaxKind};
 
 /// Describes the syntactic context at the cursor position.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -9,7 +8,9 @@ pub(crate) enum CursorContext {
     /// Inside an attribute bracket `[[ … ]]`.
     Attribute,
     /// After a dot (member access / swizzle).
-    MemberAccess { receiver: String },
+    MemberAccess {
+        receiver: String,
+    },
     /// After `#` (preprocessor directive).
     Preprocessor,
     /// Inside an `#include` directive.
@@ -54,15 +55,20 @@ fn detect_context_from_tree(
             | SyntaxKind::PreprocPragma => return Some(CursorContext::Preprocessor),
             SyntaxKind::MemberExpr => {
                 let receiver = helpers::node_text(&current, source).to_string();
-                return Some(CursorContext::MemberAccess { receiver });
-            }
-            _ => {}
+                return Some(CursorContext::MemberAccess {
+                    receiver,
+                });
+            },
+            _ => {},
         }
         current = current.parent()?;
     }
 }
 
-fn detect_context_from_text(text: &str, position: Position) -> CursorContext {
+fn detect_context_from_text(
+    text: &str,
+    position: Position,
+) -> CursorContext {
     let line_idx = position.line as usize;
     let char_idx = position.character as usize;
 
@@ -99,7 +105,9 @@ fn detect_context_from_text(text: &str, position: Position) -> CursorContext {
             .rev()
             .collect();
         if !receiver.is_empty() {
-            return CursorContext::MemberAccess { receiver };
+            return CursorContext::MemberAccess {
+                receiver,
+            };
         }
     }
 

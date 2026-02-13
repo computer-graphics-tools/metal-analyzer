@@ -1,4 +1,4 @@
-use super::types::BuiltinEntry;
+use crate::metal::builtins::types::BuiltinEntry;
 
 pub(crate) fn add_scalar_types(entries: &mut Vec<BuiltinEntry>) {
     for t in &[
@@ -30,15 +30,10 @@ pub(crate) fn add_scalar_types(entries: &mut Vec<BuiltinEntry>) {
 }
 
 pub(crate) fn add_vector_types(entries: &mut Vec<BuiltinEntry>) {
-    for base in &[
-        "bool", "char", "uchar", "short", "ushort", "int", "uint", "half", "float", "bfloat",
-    ] {
+    for base in &["bool", "char", "uchar", "short", "ushort", "int", "uint", "half", "float", "bfloat"] {
         for n in 2..=4 {
             let label = format!("{base}{n}");
-            entries.push(BuiltinEntry::typ(
-                &label,
-                &format!("Vector type ({n} components of {base})"),
-            ));
+            entries.push(BuiltinEntry::typ(&label, &format!("Vector type ({n} components of {base})")));
         }
     }
 }
@@ -48,10 +43,7 @@ pub(crate) fn add_matrix_types(entries: &mut Vec<BuiltinEntry>) {
         for c in 2..=4 {
             for r in 2..=4 {
                 let label = format!("{base}{c}x{r}");
-                entries.push(BuiltinEntry::typ(
-                    &label,
-                    &format!("Matrix type ({c} columns, {r} rows of {base})"),
-                ));
+                entries.push(BuiltinEntry::typ(&label, &format!("Matrix type ({c} columns, {r} rows of {base})")));
             }
         }
     }
@@ -82,14 +74,8 @@ pub(crate) fn add_texture_types(entries: &mut Vec<BuiltinEntry>) {
 }
 
 pub(crate) fn add_sampler_types(entries: &mut Vec<BuiltinEntry>) {
-    entries.push(BuiltinEntry::typ(
-        "sampler",
-        "Sampler object for texture sampling",
-    ));
-    entries.push(BuiltinEntry::typ(
-        "const_sampler",
-        "Compile-time constant sampler (Metal 2.0+)",
-    ));
+    entries.push(BuiltinEntry::typ("sampler", "Sampler object for texture sampling"));
+    entries.push(BuiltinEntry::typ("const_sampler", "Compile-time constant sampler (Metal 2.0+)"));
 }
 
 pub(crate) fn add_atomic_types(entries: &mut Vec<BuiltinEntry>) {
@@ -99,15 +85,10 @@ pub(crate) fn add_atomic_types(entries: &mut Vec<BuiltinEntry>) {
 }
 
 pub(crate) fn add_packed_types(entries: &mut Vec<BuiltinEntry>) {
-    for base in &[
-        "char", "uchar", "short", "ushort", "int", "uint", "half", "float",
-    ] {
+    for base in &["char", "uchar", "short", "ushort", "int", "uint", "half", "float"] {
         for n in 2..=4 {
             let label = format!("packed_{base}{n}");
-            entries.push(BuiltinEntry::typ(
-                &label,
-                &format!("Packed vector type ({n} components of {base})"),
-            ));
+            entries.push(BuiltinEntry::typ(&label, &format!("Packed vector type ({n} components of {base})")));
         }
     }
 }
@@ -120,18 +101,10 @@ pub(crate) fn add_math_functions(entries: &mut Vec<BuiltinEntry>) {
         ("asin", "T asin(T x)", "Arc sine of x"),
         ("asinh", "T asinh(T x)", "Inverse hyperbolic sine"),
         ("atan", "T atan(T y_over_x)", "Arc tangent"),
-        (
-            "atan2",
-            "T atan2(T y, T x)",
-            "Arc tangent of y/x using signs to determine quadrant",
-        ),
+        ("atan2", "T atan2(T y, T x)", "Arc tangent of y/x using signs to determine quadrant"),
         ("atanh", "T atanh(T x)", "Inverse hyperbolic tangent"),
         ("ceil", "T ceil(T x)", "Round x up to integer"),
-        (
-            "copysign",
-            "T copysign(T x, T y)",
-            "Return x with the sign of y",
-        ),
+        ("copysign", "T copysign(T x, T y)", "Return x with the sign of y"),
         ("cos", "T cos(T x)", "Cosine of x"),
         ("cosh", "T cosh(T x)", "Hyperbolic cosine"),
         ("cospi", "T cospi(T x)", "Cosine of x * pi"),
@@ -142,86 +115,30 @@ pub(crate) fn add_math_functions(entries: &mut Vec<BuiltinEntry>) {
         ("abs", "T abs(T x)", "Absolute value (integer/float)"),
         ("fdim", "T fdim(T x, T y)", "Positive difference x - y"),
         ("floor", "T floor(T x)", "Round x down to integer"),
-        (
-            "fma",
-            "T fma(T a, T b, T c)",
-            "Fused multiply-add: a * b + c",
-        ),
-        (
-            "fmax",
-            "T fmax(T x, T y)",
-            "Maximum of x and y (floating point)",
-        ),
-        (
-            "fmin",
-            "T fmin(T x, T y)",
-            "Minimum of x and y (floating point)",
-        ),
-        (
-            "fmod",
-            "T fmod(T x, T y)",
-            "Floating point remainder of x / y",
-        ),
-        (
-            "fract",
-            "T fract(T x)",
-            "Fractional part of x (x - floor(x))",
-        ),
+        ("fma", "T fma(T a, T b, T c)", "Fused multiply-add: a * b + c"),
+        ("fmax", "T fmax(T x, T y)", "Maximum of x and y (floating point)"),
+        ("fmin", "T fmin(T x, T y)", "Minimum of x and y (floating point)"),
+        ("fmod", "T fmod(T x, T y)", "Floating point remainder of x / y"),
+        ("fract", "T fract(T x)", "Fractional part of x (x - floor(x))"),
         ("frexp", "T frexp(T x, thread int &exp)", "Split float"),
         ("ilogb", "int ilogb(T x)", "Integer binary logarithm"),
-        (
-            "ldexp",
-            "T ldexp(T x, int k)",
-            "Multiply x by 2 to the power k",
-        ),
+        ("ldexp", "T ldexp(T x, int k)", "Multiply x by 2 to the power k"),
         ("log", "T log(T x)", "Natural logarithm"),
         ("log2", "T log2(T x)", "Base-2 logarithm"),
         ("log10", "T log10(T x)", "Base-10 logarithm"),
-        (
-            "modf",
-            "T modf(T x, thread T &iptr)",
-            "Decompose x into integral and fractional parts",
-        ),
-        (
-            "nan",
-            "T nan(uint nancode)",
-            "Generate a quiet NaN with nancode",
-        ),
-        (
-            "nextafter",
-            "T nextafter(T x, T y)",
-            "Next representable value after x towards y",
-        ),
+        ("modf", "T modf(T x, thread T &iptr)", "Decompose x into integral and fractional parts"),
+        ("nan", "T nan(uint nancode)", "Generate a quiet NaN with nancode"),
+        ("nextafter", "T nextafter(T x, T y)", "Next representable value after x towards y"),
         ("pow", "T pow(T x, T y)", "x to the power y"),
         ("pown", "T pown(T x, int y)", "x to the power y (integer y)"),
         ("powr", "T powr(T x, T y)", "x to the power y (x >= 0)"),
-        (
-            "remainder",
-            "T remainder(T x, T y)",
-            "IEEE 754 floating point remainder",
-        ),
-        (
-            "rint",
-            "T rint(T x)",
-            "Round to nearest integer (current rounding mode)",
-        ),
-        (
-            "round",
-            "T round(T x)",
-            "Round to nearest integer (halfway cases away from zero)",
-        ),
-        (
-            "rsqrt",
-            "T rsqrt(T x)",
-            "Reciprocal square root (1 / sqrt(x))",
-        ),
+        ("remainder", "T remainder(T x, T y)", "IEEE 754 floating point remainder"),
+        ("rint", "T rint(T x)", "Round to nearest integer (current rounding mode)"),
+        ("round", "T round(T x)", "Round to nearest integer (halfway cases away from zero)"),
+        ("rsqrt", "T rsqrt(T x)", "Reciprocal square root (1 / sqrt(x))"),
         ("sign", "T sign(T x)", "Sign of x (-1, 0, or 1)"),
         ("sin", "T sin(T x)", "Sine of x"),
-        (
-            "sincos",
-            "void sincos(T x, thread T &s, thread T &c)",
-            "Sine and cosine of x",
-        ),
+        ("sincos", "void sincos(T x, thread T &s, thread T &c)", "Sine and cosine of x"),
         ("sinh", "T sinh(T x)", "Hyperbolic sine"),
         ("sinpi", "T sinpi(T x)", "Sine of x * pi"),
         ("sqrt", "T sqrt(T x)", "Square root of x"),
@@ -229,38 +146,14 @@ pub(crate) fn add_math_functions(entries: &mut Vec<BuiltinEntry>) {
         ("tanh", "T tanh(T x)", "Hyperbolic tangent"),
         ("tanpi", "T tanpi(T x)", "Tangent of x * pi"),
         ("trunc", "T trunc(T x)", "Round x towards zero"),
-        (
-            "clamp",
-            "T clamp(T x, T min, T max)",
-            "Clamp x between min and max",
-        ),
-        (
-            "mix",
-            "T mix(T x, T y, T a)",
-            "Linear interpolation between x and y by a",
-        ),
-        (
-            "step",
-            "T step(T edge, T x)",
-            "Returns 0.0 if x < edge, else 1.0",
-        ),
-        (
-            "smoothstep",
-            "T smoothstep(T edge0, T edge1, T x)",
-            "Hermite interpolation between edge0 and edge1",
-        ),
+        ("clamp", "T clamp(T x, T min, T max)", "Clamp x between min and max"),
+        ("mix", "T mix(T x, T y, T a)", "Linear interpolation between x and y by a"),
+        ("step", "T step(T edge, T x)", "Returns 0.0 if x < edge, else 1.0"),
+        ("smoothstep", "T smoothstep(T edge0, T edge1, T x)", "Hermite interpolation between edge0 and edge1"),
         ("isfinite", "bool isfinite(T x)", "Test if x is finite"),
         ("isinf", "bool isinf(T x)", "Test if x is infinite"),
-        (
-            "isnan",
-            "bool isnan(T x)",
-            "Test if x is Not-a-Number (NaN)",
-        ),
-        (
-            "isnormal",
-            "bool isnormal(T x)",
-            "Test if x is a normal floating-point value",
-        ),
+        ("isnan", "bool isnan(T x)", "Test if x is Not-a-Number (NaN)"),
+        ("isnormal", "bool isnormal(T x)", "Test if x is a normal floating-point value"),
     ];
 
     for (name, detail, doc) in &funcs {
@@ -271,38 +164,14 @@ pub(crate) fn add_math_functions(entries: &mut Vec<BuiltinEntry>) {
 pub(crate) fn add_geometric_functions(entries: &mut Vec<BuiltinEntry>) {
     let cat = "Geometric";
     let funcs = [
-        (
-            "cross",
-            "T cross(T x, T y)",
-            "Cross product of two 3-component vectors",
-        ),
-        (
-            "distance",
-            "T distance(T x, T y)",
-            "Distance between two points",
-        ),
+        ("cross", "T cross(T x, T y)", "Cross product of two 3-component vectors"),
+        ("distance", "T distance(T x, T y)", "Distance between two points"),
         ("dot", "T dot(T x, T y)", "Dot product of two vectors"),
-        (
-            "faceforward",
-            "T faceforward(T N, T I, T Nref)",
-            "Orient a vector to point away from a surface",
-        ),
+        ("faceforward", "T faceforward(T N, T I, T Nref)", "Orient a vector to point away from a surface"),
         ("length", "T length(T x)", "Length (magnitude) of a vector"),
-        (
-            "normalize",
-            "T normalize(T x)",
-            "Normalize a vector to length 1",
-        ),
-        (
-            "reflect",
-            "T reflect(T I, T N)",
-            "Calculate reflection direction",
-        ),
-        (
-            "refract",
-            "T refract(T I, T N, T eta)",
-            "Calculate refraction direction",
-        ),
+        ("normalize", "T normalize(T x)", "Normalize a vector to length 1"),
+        ("reflect", "T reflect(T I, T N)", "Calculate reflection direction"),
+        ("refract", "T refract(T I, T N, T eta)", "Calculate refraction direction"),
     ];
 
     for (name, detail, doc) in &funcs {
@@ -313,17 +182,9 @@ pub(crate) fn add_geometric_functions(entries: &mut Vec<BuiltinEntry>) {
 pub(crate) fn add_relational_functions(entries: &mut Vec<BuiltinEntry>) {
     let cat = "Relational";
     let funcs = [
-        (
-            "all",
-            "bool all(boolN x)",
-            "True if all components are true",
-        ),
+        ("all", "bool all(boolN x)", "True if all components are true"),
         ("any", "bool any(boolN x)", "True if any component is true"),
-        (
-            "select",
-            "T select(T a, T b, bool c)",
-            "Select a or b based on c (component-wise)",
-        ),
+        ("select", "T select(T a, T b, bool c)", "Select a or b based on c (component-wise)"),
     ];
     for (name, detail, doc) in &funcs {
         entries.push(BuiltinEntry::func(name, detail, doc, cat));
@@ -380,96 +241,24 @@ pub(crate) fn add_synchronization_functions(entries: &mut Vec<BuiltinEntry>) {
 pub(crate) fn add_simd_functions(entries: &mut Vec<BuiltinEntry>) {
     let cat = "SIMD";
     let funcs = [
-        (
-            "simd_sum",
-            "T simd_sum(T data)",
-            "Sum of data across the SIMD group",
-        ),
-        (
-            "simd_product",
-            "T simd_product(T data)",
-            "Product of data across the SIMD group",
-        ),
-        (
-            "simd_min",
-            "T simd_min(T data)",
-            "Minimum of data across the SIMD group",
-        ),
-        (
-            "simd_max",
-            "T simd_max(T data)",
-            "Maximum of data across the SIMD group",
-        ),
-        (
-            "simd_prefix_exclusive_sum",
-            "T simd_prefix_exclusive_sum(T data)",
-            "Exclusive prefix sum",
-        ),
-        (
-            "simd_prefix_inclusive_sum",
-            "T simd_prefix_inclusive_sum(T data)",
-            "Inclusive prefix sum",
-        ),
-        (
-            "simd_prefix_exclusive_product",
-            "T simd_prefix_exclusive_product(T data)",
-            "Exclusive prefix product",
-        ),
-        (
-            "simd_prefix_inclusive_product",
-            "T simd_prefix_inclusive_product(T data)",
-            "Inclusive prefix product",
-        ),
-        (
-            "simd_shuffle",
-            "T simd_shuffle(T data, ushort lane)",
-            "Shuffle data from another lane",
-        ),
-        (
-            "simd_shuffle_down",
-            "T simd_shuffle_down(T data, ushort delta)",
-            "Shuffle data from a lower lane",
-        ),
-        (
-            "simd_shuffle_up",
-            "T simd_shuffle_up(T data, ushort delta)",
-            "Shuffle data from a higher lane",
-        ),
-        (
-            "simd_shuffle_xor",
-            "T simd_shuffle_xor(T data, ushort mask)",
-            "Shuffle data using XOR on lane ID",
-        ),
-        (
-            "simd_broadcast",
-            "T simd_broadcast(T data, ushort lane)",
-            "Broadcast data from one lane to all",
-        ),
-        (
-            "simd_ballot",
-            "ulong simd_ballot(bool predicate)",
-            "Bitmask of lanes where predicate is true",
-        ),
-        (
-            "quad_broadcast",
-            "T quad_broadcast(T data, ushort lane)",
-            "Broadcast within a quad",
-        ),
-        (
-            "quad_shuffle_up",
-            "T quad_shuffle_up(T data, ushort delta)",
-            "Shuffle up within a quad",
-        ),
-        (
-            "quad_shuffle_down",
-            "T quad_shuffle_down(T data, ushort delta)",
-            "Shuffle down within a quad",
-        ),
-        (
-            "quad_shuffle_xor",
-            "T quad_shuffle_xor(T data, ushort mask)",
-            "Shuffle XOR within a quad",
-        ),
+        ("simd_sum", "T simd_sum(T data)", "Sum of data across the SIMD group"),
+        ("simd_product", "T simd_product(T data)", "Product of data across the SIMD group"),
+        ("simd_min", "T simd_min(T data)", "Minimum of data across the SIMD group"),
+        ("simd_max", "T simd_max(T data)", "Maximum of data across the SIMD group"),
+        ("simd_prefix_exclusive_sum", "T simd_prefix_exclusive_sum(T data)", "Exclusive prefix sum"),
+        ("simd_prefix_inclusive_sum", "T simd_prefix_inclusive_sum(T data)", "Inclusive prefix sum"),
+        ("simd_prefix_exclusive_product", "T simd_prefix_exclusive_product(T data)", "Exclusive prefix product"),
+        ("simd_prefix_inclusive_product", "T simd_prefix_inclusive_product(T data)", "Inclusive prefix product"),
+        ("simd_shuffle", "T simd_shuffle(T data, ushort lane)", "Shuffle data from another lane"),
+        ("simd_shuffle_down", "T simd_shuffle_down(T data, ushort delta)", "Shuffle data from a lower lane"),
+        ("simd_shuffle_up", "T simd_shuffle_up(T data, ushort delta)", "Shuffle data from a higher lane"),
+        ("simd_shuffle_xor", "T simd_shuffle_xor(T data, ushort mask)", "Shuffle data using XOR on lane ID"),
+        ("simd_broadcast", "T simd_broadcast(T data, ushort lane)", "Broadcast data from one lane to all"),
+        ("simd_ballot", "ulong simd_ballot(bool predicate)", "Bitmask of lanes where predicate is true"),
+        ("quad_broadcast", "T quad_broadcast(T data, ushort lane)", "Broadcast within a quad"),
+        ("quad_shuffle_up", "T quad_shuffle_up(T data, ushort delta)", "Shuffle up within a quad"),
+        ("quad_shuffle_down", "T quad_shuffle_down(T data, ushort delta)", "Shuffle down within a quad"),
+        ("quad_shuffle_xor", "T quad_shuffle_xor(T data, ushort mask)", "Shuffle XOR within a quad"),
     ];
 
     for (name, detail, doc) in &funcs {
@@ -485,11 +274,7 @@ pub(crate) fn add_atomic_functions(entries: &mut Vec<BuiltinEntry>) {
             "void atomic_store_explicit(volatile device A* obj, T des, memory_order order)",
             "Atomic store",
         ),
-        (
-            "atomic_load_explicit",
-            "T atomic_load_explicit(volatile device A* obj, memory_order order)",
-            "Atomic load",
-        ),
+        ("atomic_load_explicit", "T atomic_load_explicit(volatile device A* obj, memory_order order)", "Atomic load"),
         (
             "atomic_exchange_explicit",
             "T atomic_exchange_explicit(volatile device A* obj, T des, memory_order order)",
@@ -549,26 +334,10 @@ pub(crate) fn add_atomic_functions(entries: &mut Vec<BuiltinEntry>) {
 
 pub(crate) fn add_attributes(entries: &mut Vec<BuiltinEntry>) {
     let attrs = [
-        (
-            "buffer",
-            "[[buffer(n)]]",
-            "Assigns a buffer to an index in the buffer argument table.",
-        ),
-        (
-            "texture",
-            "[[texture(n)]]",
-            "Assigns a texture to an index in the texture argument table.",
-        ),
-        (
-            "sampler",
-            "[[sampler(n)]]",
-            "Assigns a sampler to an index in the sampler argument table.",
-        ),
-        (
-            "thread_position_in_grid",
-            "[[thread_position_in_grid]]",
-            "The position of the thread in the grid.",
-        ),
+        ("buffer", "[[buffer(n)]]", "Assigns a buffer to an index in the buffer argument table."),
+        ("texture", "[[texture(n)]]", "Assigns a texture to an index in the texture argument table."),
+        ("sampler", "[[sampler(n)]]", "Assigns a sampler to an index in the sampler argument table."),
+        ("thread_position_in_grid", "[[thread_position_in_grid]]", "The position of the thread in the grid."),
         (
             "thread_position_in_threadgroup",
             "[[thread_position_in_threadgroup]]",
@@ -589,58 +358,22 @@ pub(crate) fn add_attributes(entries: &mut Vec<BuiltinEntry>) {
             "[[threadgroup_position_in_grid]]",
             "The position of the threadgroup in the grid.",
         ),
-        (
-            "threads_per_grid",
-            "[[threads_per_grid]]",
-            "The size of the grid in threads.",
-        ),
-        (
-            "threads_per_threadgroup",
-            "[[threads_per_threadgroup]]",
-            "The size of the threadgroup in threads.",
-        ),
-        (
-            "simd_position_in_grid",
-            "[[simd_position_in_grid]]",
-            "The position of the SIMD group in the grid.",
-        ),
+        ("threads_per_grid", "[[threads_per_grid]]", "The size of the grid in threads."),
+        ("threads_per_threadgroup", "[[threads_per_threadgroup]]", "The size of the threadgroup in threads."),
+        ("simd_position_in_grid", "[[simd_position_in_grid]]", "The position of the SIMD group in the grid."),
         (
             "simdgroup_index_in_threadgroup",
             "[[simdgroup_index_in_threadgroup]]",
             "The index of the SIMD group in the threadgroup.",
         ),
-        (
-            "position",
-            "[[position]]",
-            "Vertex position (graphics) or pixel position (fragment).",
-        ),
+        ("position", "[[position]]", "Vertex position (graphics) or pixel position (fragment)."),
         ("vertex_id", "[[vertex_id]]", "The current vertex index."),
-        (
-            "instance_id",
-            "[[instance_id]]",
-            "The current instance index.",
-        ),
-        (
-            "primitive_id",
-            "[[primitive_id]]",
-            "The current primitive index.",
-        ),
-        (
-            "point_size",
-            "[[point_size]]",
-            "Point size for point primitives.",
-        ),
+        ("instance_id", "[[instance_id]]", "The current instance index."),
+        ("primitive_id", "[[primitive_id]]", "The current primitive index."),
+        ("point_size", "[[point_size]]", "Point size for point primitives."),
         ("color", "[[color(n)]]", "Output color attachment index."),
-        (
-            "raster_order_group",
-            "[[raster_order_group(n)]]",
-            "Raster order group index.",
-        ),
-        (
-            "early_fragment_tests",
-            "[[early_fragment_tests]]",
-            "Force early fragment tests.",
-        ),
+        ("raster_order_group", "[[raster_order_group(n)]]", "Raster order group index."),
+        ("early_fragment_tests", "[[early_fragment_tests]]", "Force early fragment tests."),
     ];
 
     for (label, snippet, doc) in &attrs {
@@ -652,28 +385,13 @@ pub(crate) fn add_attributes(entries: &mut Vec<BuiltinEntry>) {
 
 pub(crate) fn add_sampler_constants(entries: &mut Vec<BuiltinEntry>) {
     let consts = [
-        (
-            "coord::normalized",
-            "Normalized texture coordinates (0.0 to 1.0)",
-        ),
+        ("coord::normalized", "Normalized texture coordinates (0.0 to 1.0)"),
         ("coord::pixel", "Unnormalized pixel texture coordinates"),
-        (
-            "address::clamp_to_edge",
-            "Clamp texture coordinates to the edge",
-        ),
-        (
-            "address::clamp_to_zero",
-            "Clamp texture coordinates to zero (transparent black)",
-        ),
-        (
-            "address::clamp_to_border",
-            "Clamp texture coordinates to border color",
-        ),
+        ("address::clamp_to_edge", "Clamp texture coordinates to the edge"),
+        ("address::clamp_to_zero", "Clamp texture coordinates to zero (transparent black)"),
+        ("address::clamp_to_border", "Clamp texture coordinates to border color"),
         ("address::repeat", "Repeat texture coordinates"),
-        (
-            "address::mirrored_repeat",
-            "Mirror repeat texture coordinates",
-        ),
+        ("address::mirrored_repeat", "Mirror repeat texture coordinates"),
         ("filter::nearest", "Nearest-neighbor filtering"),
         ("filter::linear", "Linear filtering"),
         ("mip_filter::none", "No mipmap filtering"),
@@ -731,12 +449,7 @@ pub(crate) fn add_raytracing_types(entries: &mut Vec<BuiltinEntry>) {
 
 pub(crate) fn add_misc_types(entries: &mut Vec<BuiltinEntry>) {
     // Other useful types that don't fit categories perfectly
-    let types = [
-        "render_grid_type",
-        "object_grid_type",
-        "mem_flags",
-        "thread_scope",
-    ];
+    let types = ["render_grid_type", "object_grid_type", "mem_flags", "thread_scope"];
     for t in &types {
         entries.push(BuiltinEntry::typ(t, "Metal type"));
     }
@@ -765,26 +478,10 @@ pub(crate) fn add_builtin_constants(entries: &mut Vec<BuiltinEntry>) {
         ("INT_MIN", "int", "Minimum int value"),
         ("UINT_MAX", "uint", "Maximum uint value"),
         ("CHAR_BIT", "int", "Number of bits in a char"),
-        (
-            "mem_none",
-            "mem_flags",
-            "Memory barrier flag: no memory class selected",
-        ),
-        (
-            "mem_device",
-            "mem_flags",
-            "Memory barrier flag: synchronize device memory",
-        ),
-        (
-            "mem_threadgroup",
-            "mem_flags",
-            "Memory barrier flag: synchronize threadgroup memory",
-        ),
-        (
-            "mem_threadgroup_imageblock",
-            "mem_flags",
-            "Memory barrier flag: synchronize threadgroup imageblock memory",
-        ),
+        ("mem_none", "mem_flags", "Memory barrier flag: no memory class selected"),
+        ("mem_device", "mem_flags", "Memory barrier flag: synchronize device memory"),
+        ("mem_threadgroup", "mem_flags", "Memory barrier flag: synchronize threadgroup memory"),
+        ("mem_threadgroup_imageblock", "mem_flags", "Memory barrier flag: synchronize threadgroup imageblock memory"),
     ];
 
     for (name, detail, doc) in &consts {

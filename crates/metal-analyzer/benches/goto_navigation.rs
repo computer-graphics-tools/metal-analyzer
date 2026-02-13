@@ -1,12 +1,8 @@
-use std::hint::black_box;
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::{hint::black_box, path::PathBuf, sync::Arc};
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use futures::future::join_all;
-use metal_analyzer::DefinitionProvider;
-use metal_analyzer::metal::compiler::compute_include_paths;
-use metal_analyzer::syntax::SyntaxTree;
+use metal_analyzer::{DefinitionProvider, metal::compiler::compute_include_paths, syntax::SyntaxTree};
 use tower_lsp::lsp_types::{Position, Url};
 
 const FIXTURE_RELATIVE_PATH: &str = "matmul/gemv/shaders/gemv_like.metal";
@@ -23,10 +19,7 @@ struct NavigationFixture {
 }
 
 fn has_metal_compiler() -> bool {
-    std::process::Command::new("xcrun")
-        .args(["--find", "metal"])
-        .output()
-        .is_ok_and(|output| output.status.success())
+    std::process::Command::new("xcrun").args(["--find", "metal"]).output().is_ok_and(|output| output.status.success())
 }
 
 fn fixture_cases_root() -> PathBuf {
@@ -52,11 +45,18 @@ fn fixture_path(relative_path: &str) -> PathBuf {
     fixture_cases_root().join(relative_path)
 }
 
-fn position_of(source: &str, needle: &str) -> Position {
+fn position_of(
+    source: &str,
+    needle: &str,
+) -> Position {
     position_of_nth(source, needle, 0)
 }
 
-fn position_of_nth(source: &str, needle: &str, nth: usize) -> Position {
+fn position_of_nth(
+    source: &str,
+    needle: &str,
+    nth: usize,
+) -> Position {
     assert!(!needle.is_empty(), "needle must not be empty");
     let mut from = 0usize;
     let mut current = 0usize;
@@ -121,9 +121,7 @@ fn bench_goto_navigation(c: &mut Criterion) {
         let provider = Arc::clone(&provider);
         let fixture = fixture.clone();
         async move {
-            provider
-                .index_document(&fixture.uri, fixture.source.as_str(), fixture.include_paths.as_slice())
-                .await;
+            provider.index_document(&fixture.uri, fixture.source.as_str(), fixture.include_paths.as_slice()).await;
         }
     });
 

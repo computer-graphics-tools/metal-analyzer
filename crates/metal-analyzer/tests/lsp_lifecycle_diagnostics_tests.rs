@@ -1,56 +1,40 @@
 mod common;
 
-use std::path::PathBuf;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{
+    path::PathBuf,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use common::{fixture_path, has_metal_compiler, read_fixture};
 use futures::{SinkExt, StreamExt};
-use serde_json::json;
-use tower::Service;
-use tower::ServiceExt;
-use tower_lsp::jsonrpc::{Request, Response};
-use tower_lsp::lsp_types::{
-    Diagnostic, DiagnosticSeverity, DidChangeConfigurationParams, DidChangeTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, InitializedParams,
-    PublishDiagnosticsParams, TextDocumentContentChangeEvent, TextDocumentIdentifier,
-    TextDocumentItem, VersionedTextDocumentIdentifier, Url,
-};
-use tower_lsp::{ClientSocket, LspService};
-
 use metal_analyzer::MetalLanguageServer;
+use serde_json::json;
+use tower::{Service, ServiceExt};
+use tower_lsp::{
+    ClientSocket, LspService,
+    jsonrpc::{Request, Response},
+    lsp_types::{
+        Diagnostic, DiagnosticSeverity, DidChangeConfigurationParams, DidChangeTextDocumentParams,
+        DidOpenTextDocumentParams, DidSaveTextDocumentParams, InitializedParams, PublishDiagnosticsParams,
+        TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem, Url, VersionedTextDocumentIdentifier,
+    },
+};
 
 async fn initialize_service_with_params(
-    initialize_params: serde_json::Value,
+    initialize_params: serde_json::Value
 ) -> (LspService<MetalLanguageServer>, ClientSocket) {
     let (mut service, socket) = LspService::new(|client| MetalLanguageServer::new(client, false));
 
-    let initialize = Request::build("initialize")
-        .params(initialize_params)
-        .id(1)
-        .finish();
-    let init_response = service
-        .ready()
-        .await
-        .expect("service ready")
-        .call(initialize)
-        .await
-        .expect("initialize call");
+    let initialize = Request::build("initialize").params(initialize_params).id(1).finish();
+    let init_response = service.ready().await.expect("service ready").call(initialize).await.expect("initialize call");
     assert!(init_response.is_some(), "initialize should return a response");
 
     let initialized = Request::build("initialized")
         .params(serde_json::to_value(InitializedParams {}).expect("serialize initialized params"))
         .finish();
-    let initialized_response = service
-        .ready()
-        .await
-        .expect("service ready")
-        .call(initialized)
-        .await
-        .expect("initialized call");
-    assert!(
-        initialized_response.is_none(),
-        "initialized notification should not return a response"
-    );
+    let initialized_response =
+        service.ready().await.expect("service ready").call(initialized).await.expect("initialized call");
+    assert!(initialized_response.is_none(), "initialized notification should not return a response");
 
     (service, socket)
 }
@@ -60,14 +44,9 @@ async fn initialize_service() -> (LspService<MetalLanguageServer>, ClientSocket)
 }
 
 fn temporary_workspace_dir(test_name: &str) -> PathBuf {
-    let unique = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time should be after UNIX_EPOCH")
-        .as_nanos();
-    std::env::temp_dir().join(format!(
-        "metal-analyzer-{test_name}-{}-{unique}",
-        std::process::id()
-    ))
+    let unique =
+        SystemTime::now().duration_since(UNIX_EPOCH).expect("system time should be after UNIX_EPOCH").as_nanos();
+    std::env::temp_dir().join(format!("metal-analyzer-{test_name}-{}-{unique}", std::process::id()))
 }
 
 async fn send_notification<P: serde::Serialize>(
@@ -77,17 +56,10 @@ async fn send_notification<P: serde::Serialize>(
     method: &'static str,
     params: P,
 ) {
-    let request = Request::build(method)
-        .params(serde_json::to_value(params).expect("serialize notification params"))
-        .finish();
+    let request =
+        Request::build(method).params(serde_json::to_value(params).expect("serialize notification params")).finish();
     let mut call_fut = Box::pin(async {
-        service
-            .ready()
-            .await
-            .expect("service ready")
-            .call(request)
-            .await
-            .expect("notification call")
+        service.ready().await.expect("service ready").call(request).await.expect("notification call")
     });
 
     loop {
@@ -112,7 +84,10 @@ async fn send_notification<P: serde::Serialize>(
     }
 }
 
-fn parse_publish_for_uri(req: &Request, uri: &Url) -> Option<PublishDiagnosticsParams> {
+fn parse_publish_for_uri(
+    req: &Request,
+    uri: &Url,
+) -> Option<PublishDiagnosticsParams> {
     if req.method() != "textDocument/publishDiagnostics" {
         return None;
     }
@@ -130,10 +105,7 @@ async fn next_publish_for_uri(
     pending_notifications: &mut Vec<Request>,
     uri: &Url,
 ) -> PublishDiagnosticsParams {
-    if let Some(idx) = pending_notifications
-        .iter()
-        .position(|req| parse_publish_for_uri(req, uri).is_some())
-    {
+    if let Some(idx) = pending_notifications.iter().position(|req| parse_publish_for_uri(req, uri).is_some()) {
         let req = pending_notifications.remove(idx);
         return parse_publish_for_uri(&req, uri).expect("publish request should parse");
     }
@@ -145,10 +117,7 @@ async fn next_publish_for_uri(
         let req = maybe_req.expect("client socket unexpectedly closed");
         if let Some(id) = req.id().cloned() {
             let response = Response::from_ok(id, json!(null));
-            socket
-                .send(response)
-                .await
-                .expect("failed to send synthetic client response");
+            socket.send(response).await.expect("failed to send synthetic client response");
             continue;
         }
         if let Some(params) = parse_publish_for_uri(&req, uri) {
@@ -158,16 +127,13 @@ async fn next_publish_for_uri(
 }
 
 fn has_redefine_warning(diagnostics: &[Diagnostic]) -> bool {
-    diagnostics
-        .iter()
-        .any(|d| d.message.to_lowercase().contains("redefine"))
+    diagnostics.iter().any(|d| d.message.to_lowercase().contains("redefine"))
 }
 
 fn has_owner_context_errors(diagnostics: &[Diagnostic]) -> bool {
     diagnostics.iter().any(|d| {
         d.severity == Some(DiagnosticSeverity::ERROR)
-            && (d.message.contains("owner_missing_symbol")
-                || d.message.to_lowercase().contains("undeclared"))
+            && (d.message.contains("owner_missing_symbol") || d.message.to_lowercase().contains("undeclared"))
     })
 }
 
@@ -213,7 +179,9 @@ async fn open_change_save_suppresses_macro_redefinition_noise() {
         &mut pending_notifications,
         "textDocument/didSave",
         DidSaveTextDocumentParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            text_document: TextDocumentIdentifier {
+                uri: uri.clone(),
+            },
             text: None,
         },
     )
@@ -354,9 +322,7 @@ kernel void broken_kernel(device float* data [[buffer(0)]], uint tid [[thread_po
     std::fs::write(&file_path, source).expect("temporary workspace shader should be written");
 
     let workspace_uri = Url::from_directory_path(&workspace_dir).expect("workspace URI");
-    let canonical_file_path = file_path
-        .canonicalize()
-        .expect("temporary workspace shader path should canonicalize");
+    let canonical_file_path = file_path.canonicalize().expect("temporary workspace shader path should canonicalize");
     let file_uri = Url::from_file_path(&canonical_file_path).expect("file URI");
     let init_params = json!({
         "capabilities": {},
@@ -370,7 +336,7 @@ kernel void broken_kernel(device float* data [[buffer(0)]], uint tid [[thread_po
         "initializationOptions": {
             "metal-analyzer": {
                 "indexing": {
-                    "enabled": false
+                    "enable": false
                 }
             }
         }
@@ -392,7 +358,7 @@ kernel void broken_kernel(device float* data [[buffer(0)]], uint tid [[thread_po
                         "scope": "workspace"
                     },
                     "indexing": {
-                        "enabled": false
+                        "enable": false
                     },
                     "logging": {
                         "level": "error"

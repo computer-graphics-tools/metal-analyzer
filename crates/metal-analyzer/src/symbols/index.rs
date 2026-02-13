@@ -1,6 +1,6 @@
 use dashmap::DashMap;
 
-use super::types::SymbolLocation;
+use crate::symbols::types::SymbolLocation;
 
 pub struct SymbolIndex {
     pub(crate) map: DashMap<String, Vec<SymbolLocation>>,
@@ -19,17 +19,28 @@ impl SymbolIndex {
         }
     }
 
-    pub fn insert(&self, name: String, loc: SymbolLocation) {
+    pub fn insert(
+        &self,
+        name: String,
+        loc: SymbolLocation,
+    ) {
         self.map.entry(name).or_default().push(loc);
     }
 
-    pub fn get(&self, name: &str) -> Vec<SymbolLocation> {
+    pub fn get(
+        &self,
+        name: &str,
+    ) -> Vec<SymbolLocation> {
         self.map.get(name).map(|v| v.clone()).unwrap_or_default()
     }
 
     /// Search for symbols matching a query (case-insensitive substring match).
     /// Returns up to `limit` results.
-    pub fn search(&self, query: &str, limit: usize) -> Vec<(String, SymbolLocation)> {
+    pub fn search(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Vec<(String, SymbolLocation)> {
         let query_lower = query.to_lowercase();
         let mut results = Vec::new();
 

@@ -1,8 +1,7 @@
 use std::fs;
 
 use zed_extension_api::{
-    self as zed, Architecture, DownloadedFileType, GithubReleaseOptions, LanguageServerId, Os,
-    Result,
+    self as zed, Architecture, DownloadedFileType, GithubReleaseOptions, LanguageServerId, Os, Result,
     settings::LspSettings,
 };
 
@@ -19,11 +18,17 @@ impl MetalExtension {
         language_server_id: &LanguageServerId,
         worktree: &zed::Worktree,
     ) -> Result<String> {
-        let binary_settings = LspSettings::for_worktree(SERVER_NAME, worktree)
-            .ok()
-            .and_then(|lsp_settings| lsp_settings.binary);
+        let lsp_settings = LspSettings::for_worktree(SERVER_NAME, worktree).ok();
 
-        if let Some(path) = binary_settings.and_then(|binary_settings| binary_settings.path) {
+        if let Some(path) = lsp_settings.as_ref().and_then(|s| s.binary.as_ref()).and_then(|b| b.path.clone()) {
+            return Ok(path);
+        }
+
+        if let Some(path) = lsp_settings
+            .as_ref()
+            .and_then(|s| s.initialization_options.as_ref())
+            .and_then(|v| v.get("metal-analyzer")?.get("binary")?.get("path")?.as_str().map(String::from))
+        {
             return Ok(path);
         }
 
@@ -77,7 +82,7 @@ impl MetalExtension {
                      \n\
                      cargo install --git https://github.com/{GITHUB_REPO} --locked metal-analyzer\n"
                 ));
-            }
+            },
         };
 
         let version_dir = format!("{SERVER_NAME}-{}", release.version);
@@ -108,12 +113,7 @@ impl MetalExtension {
             language_server_id,
             &zed::LanguageServerInstallationStatus::Downloading,
         );
-        zed::download_file(
-            &asset.download_url,
-            &version_dir,
-            DownloadedFileType::GzipTar,
-        )
-        .map_err(|error| {
+        zed::download_file(&asset.download_url, &version_dir, DownloadedFileType::GzipTar).map_err(|error| {
             zed::set_language_server_installation_status(
                 language_server_id,
                 &zed::LanguageServerInstallationStatus::None,
@@ -127,10 +127,7 @@ impl MetalExtension {
             );
             error
         })?;
-        zed::set_language_server_installation_status(
-            language_server_id,
-            &zed::LanguageServerInstallationStatus::None,
-        );
+        zed::set_language_server_installation_status(language_server_id, &zed::LanguageServerInstallationStatus::None);
 
         remove_outdated_versions(&version_dir)?;
         self.cached_binary_path = Some(binary_path.clone());
@@ -138,7 +135,10 @@ impl MetalExtension {
         Ok(binary_path)
     }
 
-    fn language_server_arguments(&self, worktree: &zed::Worktree) -> Vec<String> {
+    fn language_server_arguments(
+        &self,
+        worktree: &zed::Worktree,
+    ) -> Vec<String> {
         LspSettings::for_worktree(SERVER_NAME, worktree)
             .ok()
             .and_then(|lsp_settings| lsp_settings.binary)
@@ -148,8 +148,7 @@ impl MetalExtension {
 }
 
 fn remove_outdated_versions(current_version_dir: &str) -> Result<()> {
-    let entries =
-        fs::read_dir(".").map_err(|error| format!("failed to list extension directory: {error}"))?;
+    let entries = fs::read_dir(".").map_err(|error| format!("failed to list extension directory: {error}"))?;
     for entry in entries {
         let entry = entry.map_err(|error| format!("failed to read extension entry: {error}"))?;
         let file_name = entry.file_name();

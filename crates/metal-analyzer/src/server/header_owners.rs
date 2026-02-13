@@ -1,13 +1,12 @@
-use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf},
+};
 
 use dashmap::DashMap;
 
 pub(crate) fn is_header_file(path: &Path) -> bool {
-    matches!(
-        path.extension().and_then(|s| s.to_str()),
-        Some("h" | "hh" | "hpp" | "hxx")
-    )
+    matches!(path.extension().and_then(|s| s.to_str()), Some("h" | "hh" | "hpp" | "hxx"))
 }
 
 pub(crate) fn parse_include_directives(source: &str) -> Vec<(String, bool)> {
@@ -94,9 +93,7 @@ pub(crate) fn resolve_include_path(
         return Some(normalize_path(include));
     }
 
-    if !is_system
-        && let Some(parent) = owner.parent()
-    {
+    if !is_system && let Some(parent) = owner.parent() {
         let candidate = parent.join(include);
         if candidate.exists() {
             return Some(normalize_path(&candidate));

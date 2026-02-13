@@ -1,29 +1,32 @@
-    use super::*;
-    use crate::syntax::cst::SyntaxNode;
+use super::*;
+use crate::syntax::cst::SyntaxNode;
 
-    fn check(input: &str, expected_tree: &str) {
-        let parser = Parser::new(input);
-        let green = parser.parse();
-        let node = SyntaxNode::new_root(green);
-        let actual_tree = format!("{:#?}", node);
+fn check(
+    input: &str,
+    expected_tree: &str,
+) {
+    let parser = Parser::new(input);
+    let green = parser.parse();
+    let node = SyntaxNode::new_root(green);
+    let actual_tree = format!("{:#?}", node);
 
-        // Normalize newlines and trim
-        let actual_tree = actual_tree.trim();
-        let expected_tree = expected_tree.trim();
+    // Normalize newlines and trim
+    let actual_tree = actual_tree.trim();
+    let expected_tree = expected_tree.trim();
 
-        assert_eq!(actual_tree, expected_tree);
-    }
+    assert_eq!(actual_tree, expected_tree);
+}
 
-    #[test]
-    fn test_empty() {
-        check("", "Root@0..0");
-    }
+#[test]
+fn test_empty() {
+    check("", "Root@0..0");
+}
 
-    #[test]
-    fn test_function_def() {
-        check(
-            "kernel void main() {}",
-            r#"
+#[test]
+fn test_function_def() {
+    check(
+        "kernel void main() {}",
+        r#"
 Root@0..21
   FunctionDef@0..21
     KwKernel@0..6 "kernel"
@@ -40,14 +43,14 @@ Root@0..21
       LBrace@19..20 "{"
       RBrace@20..21 "}"
 "#,
-        );
-    }
+    );
+}
 
-    #[test]
-    fn test_struct_def() {
-        check(
-            "struct MyStruct { float a; };",
-            r#"
+#[test]
+fn test_struct_def() {
+    check(
+        "struct MyStruct { float a; };",
+        r#"
 Root@0..29
   StructDef@0..29
     KwStruct@0..6 "struct"
@@ -67,5 +70,5 @@ Root@0..29
       RBrace@27..28 "}"
     Semicolon@28..29 ";"
 "#,
-        );
-    }
+    );
+}

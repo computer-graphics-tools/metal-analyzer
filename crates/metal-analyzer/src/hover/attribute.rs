@@ -1,10 +1,10 @@
 use tower_lsp::lsp_types::{Hover, Position};
 
-use crate::metal::builtins;
-use crate::syntax::cst::SyntaxNode;
-use crate::syntax::helpers;
-
-use super::builtins::make_hover_from_entry;
+use crate::{
+    hover::builtins::make_hover_from_entry,
+    metal::builtins,
+    syntax::{cst::SyntaxNode, helpers},
+};
 
 pub(crate) fn try_attribute_hover_from_tree(
     root: &SyntaxNode,
@@ -27,7 +27,10 @@ pub(crate) fn try_attribute_hover_from_tree(
     None
 }
 
-pub(crate) fn try_attribute_hover(text: &str, position: Position) -> Option<Hover> {
+pub(crate) fn try_attribute_hover(
+    text: &str,
+    position: Position,
+) -> Option<Hover> {
     let lines: Vec<&str> = text.lines().collect();
     let line_idx = position.line as usize;
     if line_idx >= lines.len() {

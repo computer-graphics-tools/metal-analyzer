@@ -13,8 +13,7 @@
 
 use std::path::{Path, PathBuf};
 
-use metal_analyzer::DefinitionProvider;
-use metal_analyzer::syntax::SyntaxTree;
+use metal_analyzer::{DefinitionProvider, NavigationTarget, syntax::SyntaxTree};
 use tower_lsp::lsp_types::*;
 
 #[derive(Default, Clone, Debug)]
@@ -40,10 +39,7 @@ fn fixtures_dir() -> PathBuf {
 }
 
 fn has_metal_compiler() -> bool {
-    std::process::Command::new("xcrun")
-        .args(["--find", "metal"])
-        .output()
-        .is_ok_and(|o| o.status.success())
+    std::process::Command::new("xcrun").args(["--find", "metal"]).output().is_ok_and(|o| o.status.success())
 }
 
 /// Extract all (line, col, word) triples for identifier tokens in the source.
@@ -75,7 +71,7 @@ fn extract_identifiers(source: &str) -> Vec<(u32, u32, String)> {
 /// should exist and the target line should contain the symbol name.
 ///
 /// Returns file-level validation summary with category counts.
-async fn validate_file(
+fn validate_file(
     path: &Path,
     include_paths: &[String],
 ) -> FileValidation {
@@ -85,9 +81,7 @@ async fn validate_file(
     let provider = DefinitionProvider::new();
 
     // Pre-index to populate the AST cache.
-    provider
-        .index_document(&uri, &source, include_paths)
-        .await;
+    provider.index_document(&uri, &source, include_paths);
 
     let identifiers = extract_identifiers(&source);
     let mut summary = FileValidation {
@@ -107,9 +101,7 @@ async fn validate_file(
             character: *col,
         };
 
-        let result = provider
-            .provide(&uri, position, &source, include_paths, &snapshot)
-            .await;
+        let result = provider.provide(&uri, position, &source, include_paths, &snapshot);
 
         match result {
             None => {
@@ -118,11 +110,11 @@ async fn validate_file(
                 if is_macro_ctx {
                     summary.macro_passed += 1;
                 }
-            }
+            },
             Some(resp) => {
                 let loc = match &resp {
-                    GotoDefinitionResponse::Scalar(l) => l.clone(),
-                    GotoDefinitionResponse::Array(locs) => {
+                    NavigationTarget::Single(l) => l.clone(),
+                    NavigationTarget::Multiple(locs) => {
                         if let Some(l) = locs.first() {
                             l.clone()
                         } else {
@@ -132,25 +124,11 @@ async fn validate_file(
                             }
                             continue;
                         }
-                    }
-                    GotoDefinitionResponse::Link(links) => {
-                        if let Some(l) = links.first() {
-                            Location {
-                                uri: l.target_uri.clone(),
-                                range: l.target_selection_range,
-                            }
-                        } else {
-                            summary.passed += 1;
-                            if is_macro_ctx {
-                                summary.macro_passed += 1;
-                            }
-                            continue;
-                        }
-                    }
+                    },
                 };
 
                 // Read the target file and check the target line.
-                let target_path = loc.uri.to_file_path().unwrap_or_default();
+                let target_path = loc.file_path.clone();
                 let target_line_idx = loc.range.start.line as usize;
 
                 if !target_path.exists() {
@@ -175,7 +153,7 @@ async fn validate_file(
                             target_path.display()
                         ));
                         continue;
-                    }
+                    },
                 };
 
                 let target_lines: Vec<&str> = target_source.lines().collect();
@@ -198,7 +176,7 @@ async fn validate_file(
                 // Also, some definitions use #define which contains the word
                 // in the macro body, or the word might be on the same line
                 // as part of a larger expression. Accept as long as the word
-                // appears SOMEWHERE near the target line (±2 lines).
+                // appears SOMEWHERE near the target line (+-2 lines).
                 let near_lines: Vec<&str> = target_lines
                     .get(target_line_idx.saturating_sub(1)..=(target_line_idx + 1).min(target_lines.len() - 1))
                     .unwrap_or_default()
@@ -207,10 +185,7 @@ async fn validate_file(
 
                 // Also accept if the target file name contains the word
                 // (include-directive resolution).
-                let target_name = target_path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy();
+                let target_name = target_path.file_name().unwrap_or_default().to_string_lossy();
                 let file_name_match = target_name.contains(word.as_str());
 
                 // Accept default range (0:0) as file-level resolution.
@@ -231,7 +206,7 @@ async fn validate_file(
                         target_line.trim(),
                     ));
                 }
-            }
+            },
         }
     }
 
@@ -243,11 +218,7 @@ fn collect_metal_files(dir: &Path) -> Vec<PathBuf> {
     if dir.is_file() && dir.extension().is_some_and(|e| e == "metal") {
         files.push(dir.to_path_buf());
     } else if dir.is_dir() {
-        for entry in walkdir::WalkDir::new(dir)
-            .follow_links(true)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
+        for entry in walkdir::WalkDir::new(dir).follow_links(true).into_iter().filter_map(|e| e.ok()) {
             let p = entry.path();
             if p.extension().is_some_and(|e| e == "metal" || e == "h") {
                 files.push(p.to_path_buf());
@@ -270,17 +241,19 @@ fn include_paths_for(file: &Path) -> Vec<String> {
     paths
 }
 
-fn is_macro_context(line: &str, word: &str) -> bool {
-    line.trim_start().starts_with("#")
-        || word.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+fn is_macro_context(
+    line: &str,
+    word: &str,
+) -> bool {
+    line.trim_start().starts_with("#") || word.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
 }
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-#[tokio::test]
-async fn exhaustive_fixtures() {
+#[test]
+fn exhaustive_fixtures() {
     if !has_metal_compiler() {
         return;
     }
@@ -301,7 +274,7 @@ async fn exhaustive_fixtures() {
             continue;
         }
         let includes = include_paths_for(file);
-        let summary = validate_file(file, &includes).await;
+        let summary = validate_file(file, &includes);
         grand_total += summary.total;
         grand_passed += summary.passed;
         grand_macro_total += summary.macro_total;
@@ -340,13 +313,8 @@ async fn exhaustive_fixtures() {
         }
     }
 
-    eprintln!(
-        "\nTotal: {grand_passed}/{grand_total} identifiers OK, {} failures",
-        total_failures.len()
-    );
-    eprintln!(
-        "Macro-context: {grand_macro_passed}/{grand_macro_total} identifiers OK"
-    );
+    eprintln!("\nTotal: {grand_passed}/{grand_total} identifiers OK, {} failures", total_failures.len());
+    eprintln!("Macro-context: {grand_macro_passed}/{grand_macro_total} identifiers OK");
     eprintln!(
         "Failure categories: missing_file={}, unreadable={}, out_of_range={}, wrong_target={}",
         grand_categories.missing_file,
@@ -363,7 +331,10 @@ async fn exhaustive_fixtures() {
     );
 }
 
-async fn run_external_audit(dir: &Path, label: &str) {
+fn run_external_audit(
+    dir: &Path,
+    label: &str,
+) {
     let files = collect_metal_files(dir);
     if files.is_empty() {
         eprintln!("No .metal/.h files found for {label} at {}", dir.display());
@@ -384,7 +355,7 @@ async fn run_external_audit(dir: &Path, label: &str) {
             continue;
         }
         let includes = include_paths_for(file);
-        let summary = validate_file(file, &includes).await;
+        let summary = validate_file(file, &includes);
         grand_total += summary.total;
         grand_passed += summary.passed;
         grand_macro_total += summary.macro_total;
@@ -423,13 +394,8 @@ async fn run_external_audit(dir: &Path, label: &str) {
         }
     }
 
-    eprintln!(
-        "\nTotal: {grand_passed}/{grand_total} identifiers OK, {} failures",
-        total_failures.len()
-    );
-    eprintln!(
-        "Macro-context: {grand_macro_passed}/{grand_macro_total} identifiers OK"
-    );
+    eprintln!("\nTotal: {grand_passed}/{grand_total} identifiers OK, {} failures", total_failures.len());
+    eprintln!("Macro-context: {grand_macro_passed}/{grand_macro_total} identifiers OK");
     eprintln!(
         "Failure categories: missing_file={}, unreadable={}, out_of_range={}, wrong_target={}",
         grand_categories.missing_file,
@@ -440,17 +406,14 @@ async fn run_external_audit(dir: &Path, label: &str) {
 
     // Non-blocking audit: report failures without failing the test.
     if !total_failures.is_empty() {
-        eprintln!(
-            "\n{} false-positive definition(s) in {label} files (non-fatal).",
-            total_failures.len()
-        );
+        eprintln!("\n{} false-positive definition(s) in {label} files (non-fatal).", total_failures.len());
     }
 }
 
 /// Run against an external shader directory specified by METAL_TEST_DIR.
 /// Skipped if the env var is not set.
-#[tokio::test]
-async fn exhaustive_external() {
+#[test]
+fn exhaustive_external() {
     if !has_metal_compiler() {
         return;
     }
@@ -460,17 +423,17 @@ async fn exhaustive_external() {
         Err(_) => {
             eprintln!("METAL_TEST_DIR not set, skipping external test");
             return;
-        }
+        },
     };
 
-    run_external_audit(&dir, "METAL_TEST_DIR").await;
+    run_external_audit(&dir, "METAL_TEST_DIR");
 }
 
 /// Auto-detect the repository's external kernel corpus and run the same
 /// non-blocking exhaustive audit when present.
-#[tokio::test]
+#[test]
 #[ignore = "developer-only audit against external kernel corpus"]
-async fn exhaustive_external_kernel_corpus_if_present() {
+fn exhaustive_external_kernel_corpus_if_present() {
     if !has_metal_compiler() {
         return;
     }
@@ -494,12 +457,9 @@ async fn exhaustive_external_kernel_corpus_if_present() {
         .find(|candidate| candidate.exists());
 
     let Some(dir) = dir else {
-        eprintln!(
-            "external kernel corpus directory not found under {}, skipping",
-            external_root.display()
-        );
+        eprintln!("external kernel corpus directory not found under {}, skipping", external_root.display());
         return;
     };
 
-    run_external_audit(&dir, "external-kernel-corpus").await;
+    run_external_audit(&dir, "external-kernel-corpus");
 }

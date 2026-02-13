@@ -1,27 +1,31 @@
-use std::time::Duration;
-use std::sync::atomic::Ordering;
+use std::{sync::atomic::Ordering, time::Duration};
 
-use tower_lsp::LanguageServer;
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::*;
+use tower_lsp::{LanguageServer, jsonrpc::Result, lsp_types::*};
 use tracing::{debug, info, warn};
 
-use crate::progress::ProgressToken;
-use crate::semantic_tokens::get_legend;
-use crate::syntax::SyntaxTree;
+use crate::{
+    ide::lsp::{ide_location_to_lsp, ide_range_to_lsp, navigation_target_to_lsp},
+    progress::ProgressToken,
+    semantic_tokens::get_legend,
+    server::{
+        diagnostics::{compile_filtered_diagnostics_for_document, compute_include_paths_for_uri_cached},
+        formatting::{FormattingError, format_document},
+        header_owners::{collect_included_headers, update_owner_links},
+        settings::ServerSettings,
+        state::MetalLanguageServer,
+    },
+    syntax::SyntaxTree,
+};
 
-use super::diagnostics::{compile_filtered_diagnostics_for_document, compute_include_paths_for_uri_cached};
-use super::formatting::{FormattingError, format_document};
-use super::header_owners::{collect_included_headers, update_owner_links};
-use super::settings::ServerSettings;
-use super::state::MetalLanguageServer;
-
-const CLIENT_NOTIFICATION_PREFIX: &str = "Metal Analyzer:";
+const CLIENT_NOTIFICATION_PREFIX: &str = "metal-analyzer:";
 
 #[tower_lsp::async_trait]
 impl LanguageServer for MetalLanguageServer {
-    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
-        info!("Initializing Metal Analyzer...");
+    async fn initialize(
+        &self,
+        params: InitializeParams,
+    ) -> Result<InitializeResult> {
+        info!("Initializing metal-analyzer...");
 
         let initial_settings = ServerSettings::from_lsp_payload(params.initialization_options.as_ref());
         self.apply_settings(initial_settings).await;
@@ -45,15 +49,9 @@ impl LanguageServer for MetalLanguageServer {
 
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::INCREMENTAL,
-                )),
+                text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::INCREMENTAL)),
                 completion_provider: Some(CompletionOptions {
-                    trigger_characters: Some(vec![
-                        ".".to_string(),
-                        ":".to_string(),
-                        "#".to_string(),
-                    ]),
+                    trigger_characters: Some(vec![".".to_string(), ":".to_string(), "#".to_string()]),
                     ..Default::default()
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
@@ -69,16 +67,14 @@ impl LanguageServer for MetalLanguageServer {
                     prepare_provider: Some(true),
                     work_done_progress_options: Default::default(),
                 })),
-                semantic_tokens_provider: Some(
-                    SemanticTokensServerCapabilities::SemanticTokensOptions(
-                        SemanticTokensOptions {
-                            legend: get_legend(),
-                            full: Some(SemanticTokensFullOptions::Bool(true)),
-                            range: Some(false),
-                            work_done_progress_options: Default::default(),
-                        },
-                    ),
-                ),
+                semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
+                    SemanticTokensOptions {
+                        legend: get_legend(),
+                        full: Some(SemanticTokensFullOptions::Bool(true)),
+                        range: Some(false),
+                        work_done_progress_options: Default::default(),
+                    },
+                )),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
@@ -89,11 +85,14 @@ impl LanguageServer for MetalLanguageServer {
         })
     }
 
-    async fn initialized(&self, _: InitializedParams) {
-        info!("Metal Analyzer initialized");
+    async fn initialized(
+        &self,
+        _: InitializedParams,
+    ) {
+        info!("metal-analyzer initialized");
 
         let settings = self.settings_snapshot().await;
-        let should_scan_workspace = settings.indexing.enabled || settings.diagnostics.scope.is_workspace();
+        let should_scan_workspace = settings.indexing.enable || settings.diagnostics.scope.is_workspace();
         if !should_scan_workspace {
             info!(
                 "Skipping workspace scan because metal-analyzer.indexing.enabled=false and \
@@ -109,18 +108,20 @@ impl LanguageServer for MetalLanguageServer {
         });
     }
 
-    async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+    async fn did_change_configuration(
+        &self,
+        params: DidChangeConfigurationParams,
+    ) {
         let current = self.settings_snapshot().await;
         let merged = current.merged_with_payload(&params.settings);
         if merged == current {
             return;
         }
 
-        let workspace_scan_enabled_after_change =
-            merged.indexing.enabled || merged.diagnostics.scope.is_workspace();
+        let workspace_scan_enabled_after_change = merged.indexing.enable || merged.diagnostics.scope.is_workspace();
         let scope_became_workspace =
             !current.diagnostics.scope.is_workspace() && merged.diagnostics.scope.is_workspace();
-        let indexing_inputs_changed = merged.indexing != current.indexing && merged.indexing.enabled;
+        let indexing_inputs_changed = merged.indexing != current.indexing && merged.indexing.enable;
         let compiler_inputs_changed = merged.compiler != current.compiler;
         let should_start_workspace_scan = workspace_scan_enabled_after_change
             && (scope_became_workspace || indexing_inputs_changed || compiler_inputs_changed);
@@ -138,7 +139,7 @@ impl LanguageServer for MetalLanguageServer {
     }
 
     async fn shutdown(&self) -> Result<()> {
-        info!("Shutting down Metal Analyzer");
+        info!("Shutting down metal-analyzer");
         self.client
             .show_message(
                 MessageType::WARNING,
@@ -150,24 +151,22 @@ impl LanguageServer for MetalLanguageServer {
         Ok(())
     }
 
-    async fn did_open(&self, params: DidOpenTextDocumentParams) {
+    async fn did_open(
+        &self,
+        params: DidOpenTextDocumentParams,
+    ) {
         let uri = params.text_document.uri;
         let text = params.text_document.text;
         let version = params.text_document.version;
         let filename = short_name(&uri);
         let settings = self.settings_snapshot().await;
         let diagnostics_on_type = settings.diagnostics.on_type;
-        let indexing_enabled = settings.indexing.enabled;
+        let indexing_enabled = settings.indexing.enable;
         let allow_client_info_logs = settings.logging.level.allows_info();
 
         info!("Opened {filename} (v{version}, {} bytes)", text.len());
         if allow_client_info_logs {
-            self.client
-                .log_message(
-                    MessageType::INFO,
-                    prefixed_client_message(format!("Opened {filename}")),
-                )
-                .await;
+            self.client.log_message(MessageType::INFO, prefixed_client_message(format!("Opened {filename}"))).await;
         }
 
         // Lightweight synchronous work only.
@@ -181,10 +180,8 @@ impl LanguageServer for MetalLanguageServer {
         let provider = self.definition_provider.clone();
         let compiler = self.compiler.clone();
         let client = self.client.clone();
-        let workspace_roots = self.workspace_roots.read().await
-            .iter()
-            .filter_map(|f| f.uri.to_file_path().ok())
-            .collect::<Vec<_>>();
+        let workspace_roots =
+            self.workspace_roots.read().await.iter().filter_map(|f| f.uri.to_file_path().ok()).collect::<Vec<_>>();
         let header_owners = self.header_owners.clone();
         let owner_headers = self.owner_headers.clone();
         let document_store = self.document_store.clone();
@@ -234,40 +231,35 @@ impl LanguageServer for MetalLanguageServer {
                         &uri,
                         &doc.text,
                     )
-                        .await;
+                    .await;
 
-                    let still_latest = diagnostics_generation
-                        .get(&uri)
-                        .is_some_and(|current| *current == generation);
+                    let still_latest = diagnostics_generation.get(&uri).is_some_and(|current| *current == generation);
                     if still_latest {
-                        client
-                            .publish_diagnostics(uri.clone(), diagnostics, Some(version))
-                            .await;
+                        client.publish_diagnostics(uri.clone(), diagnostics, Some(version)).await;
                     }
                 }
             }
 
             // AST indexing.
             if indexing_enabled {
-                provider.index_document(&uri, &text, &includes).await;
+                provider.index_document(&uri, &text, &includes);
                 if allow_client_info_logs {
                     client
-                        .log_message(
-                            MessageType::INFO,
-                            prefixed_client_message(format!("Indexed AST for {fname}")),
-                        )
+                        .log_message(MessageType::INFO, prefixed_client_message(format!("Indexed AST for {fname}")))
                         .await;
                 }
             }
         });
     }
 
-    async fn did_change(&self, params: DidChangeTextDocumentParams) {
+    async fn did_change(
+        &self,
+        params: DidChangeTextDocumentParams,
+    ) {
         let uri = params.text_document.uri;
         let version = params.text_document.version;
 
-        self.document_store
-            .apply_changes(&uri, params.content_changes, version);
+        self.document_store.apply_changes(&uri, params.content_changes, version);
 
         let Some(text) = self.document_store.get_content(&uri) else {
             return;
@@ -275,7 +267,7 @@ impl LanguageServer for MetalLanguageServer {
         let settings = self.settings_snapshot().await;
         let diagnostics_on_type = settings.diagnostics.on_type;
         let diagnostics_debounce_ms = settings.diagnostics.debounce_ms;
-        let indexing_enabled = settings.indexing.enabled;
+        let indexing_enabled = settings.indexing.enable;
 
         // Lightweight synchronous work only: parse tree + symbol scan.
         let tree = SyntaxTree::parse(&text);
@@ -304,10 +296,8 @@ impl LanguageServer for MetalLanguageServer {
         let provider = self.definition_provider.clone();
         let compiler = self.compiler.clone();
         let client = self.client.clone();
-        let workspace_roots = self.workspace_roots.read().await
-            .iter()
-            .filter_map(|f| f.uri.to_file_path().ok())
-            .collect::<Vec<_>>();
+        let workspace_roots =
+            self.workspace_roots.read().await.iter().filter_map(|f| f.uri.to_file_path().ok()).collect::<Vec<_>>();
         let header_owners = self.header_owners.clone();
         let owner_headers = self.owner_headers.clone();
         let include_paths_cache = self.include_paths_cache.clone();
@@ -320,12 +310,10 @@ impl LanguageServer for MetalLanguageServer {
             tokio::time::sleep(Duration::from_millis(diagnostics_debounce_ms)).await;
 
             // Check both generations — bail out if a newer change arrived.
-            let ast_current = ast_generation.is_some_and(|generation| {
-                ast_gen_map.get(&uri).is_some_and(|g| *g == generation)
-            });
-            let diag_current = diag_generation.is_some_and(|generation| {
-                diag_gen_map.get(&uri).is_some_and(|g| *g == generation)
-            });
+            let ast_current =
+                ast_generation.is_some_and(|generation| ast_gen_map.get(&uri).is_some_and(|g| *g == generation));
+            let diag_current =
+                diag_generation.is_some_and(|generation| diag_gen_map.get(&uri).is_some_and(|g| *g == generation));
             if !ast_current && !diag_current {
                 return;
             }
@@ -351,7 +339,7 @@ impl LanguageServer for MetalLanguageServer {
 
             // AST indexing (if still current).
             if ast_current {
-                provider.index_document(&uri, &text, &includes).await;
+                provider.index_document(&uri, &text, &includes);
             }
 
             // Diagnostics (if still current).
@@ -366,22 +354,21 @@ impl LanguageServer for MetalLanguageServer {
                     &uri,
                     &text,
                 )
-                    .await;
+                .await;
 
                 // Re-check staleness after compilation.
-                let still_latest = diag_gen_map
-                    .get(&uri)
-                    .is_some_and(|current| *current == diag_generation);
+                let still_latest = diag_gen_map.get(&uri).is_some_and(|current| *current == diag_generation);
                 if still_latest {
-                    client
-                        .publish_diagnostics(uri, diagnostics, Some(version))
-                        .await;
+                    client.publish_diagnostics(uri, diagnostics, Some(version)).await;
                 }
             }
         });
     }
 
-    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+    async fn did_save(
+        &self,
+        params: DidSaveTextDocumentParams,
+    ) {
         let uri = params.text_document.uri;
         let filename = short_name(&uri);
         let settings = self.settings_snapshot().await;
@@ -404,27 +391,25 @@ impl LanguageServer for MetalLanguageServer {
             let client = self.client.clone();
             let fname = filename.clone();
             let allow_client_info_logs = settings.logging.level.allows_info();
-            let indexing_enabled = settings.indexing.enabled;
+            let indexing_enabled = settings.indexing.enable;
             tokio::spawn(async move {
                 if indexing_enabled {
-                    provider.index_document(&uri, &text, &includes).await;
+                    provider.index_document(&uri, &text, &includes);
                     if let Some(path) = file_path {
-                        provider.index_workspace_file(&path, &includes).await;
+                        provider.index_workspace_file(&path, &includes);
                     }
                 }
                 if allow_client_info_logs {
-                    client
-                        .log_message(
-                            MessageType::INFO,
-                            prefixed_client_message(format!("Re-indexed {fname}")),
-                        )
-                        .await;
+                    client.log_message(MessageType::INFO, prefixed_client_message(format!("Re-indexed {fname}"))).await;
                 }
             });
         }
     }
 
-    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+    async fn did_close(
+        &self,
+        params: DidCloseTextDocumentParams,
+    ) {
         let uri = params.text_document.uri;
         let keep_workspace_diagnostics = self.settings_snapshot().await.diagnostics.scope.is_workspace();
         if let Ok(path) = uri.to_file_path() {
@@ -444,15 +429,16 @@ impl LanguageServer for MetalLanguageServer {
         self.ast_index_generation.remove(&uri);
     }
 
-    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+    async fn completion(
+        &self,
+        params: CompletionParams,
+    ) -> Result<Option<CompletionResponse>> {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
         let text = self.document_store.get_content(&uri);
         let tree = self.document_trees.get(&uri);
 
-        let items = self
-            .completion_provider
-            .provide(text.as_deref(), position, tree.as_ref());
+        let items = self.completion_provider.provide(text.as_deref(), position, tree.as_ref());
         Ok(Some(CompletionResponse::Array(items)))
     }
 
@@ -465,7 +451,7 @@ impl LanguageServer for MetalLanguageServer {
             return Ok(None);
         };
         let settings = self.settings_snapshot().await;
-        if !settings.formatting.enabled {
+        if !settings.formatting.enable {
             return Ok(Some(Vec::new()));
         }
 
@@ -484,7 +470,7 @@ impl LanguageServer for MetalLanguageServer {
                                 )),
                             )
                             .await;
-                    }
+                    },
                     _ => {
                         self.client
                             .show_message(
@@ -492,14 +478,17 @@ impl LanguageServer for MetalLanguageServer {
                                 prefixed_client_message(format!("Formatting failed: {error}")),
                             )
                             .await;
-                    }
+                    },
                 }
                 Ok(None)
-            }
+            },
         }
     }
 
-    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+    async fn hover(
+        &self,
+        params: HoverParams,
+    ) -> Result<Option<Hover>> {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
@@ -509,10 +498,7 @@ impl LanguageServer for MetalLanguageServer {
         };
         let tree = self.document_trees.get(&uri);
 
-        Ok(self
-            .hover_provider
-            .provide(&uri, &text, position, tree.as_ref())
-            .await)
+        Ok(self.hover_provider.provide(&uri, &text, position, tree.as_ref()).await)
     }
 
     async fn goto_definition(
@@ -526,26 +512,15 @@ impl LanguageServer for MetalLanguageServer {
             Some(t) => t,
             None => return Ok(None),
         };
-        let tree = self
-            .document_trees
-            .get(&uri)
-            .unwrap_or_else(|| SyntaxTree::parse(&text));
+        let tree = self.document_trees.get(&uri).unwrap_or_else(|| SyntaxTree::parse(&text));
 
-        let progress = ProgressToken::begin(
-            &self.client,
-            "Definition",
-            Some("Finding definition…".to_string()),
-        )
-        .await;
+        let progress = ProgressToken::begin(&self.client, "Definition", Some("Finding definition…".to_string())).await;
         let include_start = std::time::Instant::now();
         let includes = self.include_paths(&uri).await;
         let include_elapsed = include_start.elapsed();
 
         let start = std::time::Instant::now();
-        let result = self
-            .definition_provider
-            .provide(&uri, position, &text, &includes, &tree)
-            .await;
+        let nav_result = self.definition_provider.provide(&uri, position, &text, &includes, &tree);
         let elapsed = start.elapsed();
 
         let filename = short_name(&uri);
@@ -555,34 +530,27 @@ impl LanguageServer for MetalLanguageServer {
             position.character + 1,
             include_elapsed,
         );
-        match &result {
+
+        let lsp_result = nav_result.and_then(navigation_target_to_lsp);
+
+        match &lsp_result {
             Some(resp) => {
                 let target = match resp {
                     GotoDefinitionResponse::Scalar(loc) => {
                         format!("{}:{}", short_path(loc.uri.path()), loc.range.start.line + 1)
-                    }
+                    },
                     GotoDefinitionResponse::Array(locs) => format!("{} locations", locs.len()),
                     GotoDefinitionResponse::Link(links) => format!("{} links", links.len()),
                 };
-                debug!(
-                    "goto-def {filename}:{}:{} → {target} ({elapsed:?})",
-                    position.line + 1,
-                    position.character + 1,
-                );
-                progress
-                    .end(Some(format!("Resolved definition: {target}")))
-                    .await;
-            }
+                debug!("goto-def {filename}:{}:{} → {target} ({elapsed:?})", position.line + 1, position.character + 1,);
+                progress.end(Some(format!("Resolved definition: {target}"))).await;
+            },
             None => {
-                debug!(
-                    "goto-def {filename}:{}:{} → none ({elapsed:?})",
-                    position.line + 1,
-                    position.character + 1,
-                );
+                debug!("goto-def {filename}:{}:{} → none ({elapsed:?})", position.line + 1, position.character + 1,);
                 progress.end(Some("No definition found".to_string())).await;
-            }
+            },
         }
-        Ok(result)
+        Ok(lsp_result)
     }
 
     async fn semantic_tokens_full(
@@ -625,17 +593,11 @@ impl LanguageServer for MetalLanguageServer {
             Some(t) => t,
             None => return Ok(None),
         };
-        let tree = self
-            .document_trees
-            .get(&uri)
-            .unwrap_or_else(|| SyntaxTree::parse(&text));
+        let tree = self.document_trees.get(&uri).unwrap_or_else(|| SyntaxTree::parse(&text));
         let includes = self.include_paths(&uri).await;
 
-        let result = self
-            .definition_provider
-            .provide_declaration(&uri, position, &text, &includes, &tree)
-            .await;
-        Ok(result)
+        let result = self.definition_provider.provide_declaration(&uri, position, &text, &includes, &tree);
+        Ok(result.and_then(navigation_target_to_lsp))
     }
 
     async fn goto_type_definition(
@@ -648,17 +610,11 @@ impl LanguageServer for MetalLanguageServer {
             Some(t) => t,
             None => return Ok(None),
         };
-        let tree = self
-            .document_trees
-            .get(&uri)
-            .unwrap_or_else(|| SyntaxTree::parse(&text));
+        let tree = self.document_trees.get(&uri).unwrap_or_else(|| SyntaxTree::parse(&text));
         let includes = self.include_paths(&uri).await;
 
-        let result = self
-            .definition_provider
-            .provide_type_definition(&uri, position, &text, &includes, &tree)
-            .await;
-        Ok(result)
+        let result = self.definition_provider.provide_type_definition(&uri, position, &text, &includes, &tree);
+        Ok(result.and_then(navigation_target_to_lsp))
     }
 
     async fn goto_implementation(
@@ -671,44 +627,35 @@ impl LanguageServer for MetalLanguageServer {
             Some(t) => t,
             None => return Ok(None),
         };
-        let tree = self
-            .document_trees
-            .get(&uri)
-            .unwrap_or_else(|| SyntaxTree::parse(&text));
+        let tree = self.document_trees.get(&uri).unwrap_or_else(|| SyntaxTree::parse(&text));
         let includes = self.include_paths(&uri).await;
 
-        let result = self
-            .definition_provider
-            .provide_implementation(&uri, position, &text, &includes, &tree)
-            .await;
-        Ok(result)
+        let result = self.definition_provider.provide_implementation(&uri, position, &text, &includes, &tree);
+        Ok(result.and_then(navigation_target_to_lsp))
     }
 
-    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+    async fn references(
+        &self,
+        params: ReferenceParams,
+    ) -> Result<Option<Vec<Location>>> {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
         let text = match self.document_store.get_content(&uri) {
             Some(t) => t,
             None => return Ok(None),
         };
-        let tree = self
-            .document_trees
-            .get(&uri)
-            .unwrap_or_else(|| SyntaxTree::parse(&text));
+        let tree = self.document_trees.get(&uri).unwrap_or_else(|| SyntaxTree::parse(&text));
         let includes = self.include_paths(&uri).await;
 
-        let result = self
-            .definition_provider
-            .provide_references(
-                &uri,
-                position,
-                &text,
-                &includes,
-                &tree,
-                params.context.include_declaration,
-            )
-            .await;
-        Ok(result)
+        let result = self.definition_provider.provide_references(
+            &uri,
+            position,
+            &text,
+            &includes,
+            &tree,
+            params.context.include_declaration,
+        );
+        Ok(result.map(|locs| locs.into_iter().filter_map(ide_location_to_lsp).collect()))
     }
 
     async fn document_highlight(
@@ -721,19 +668,14 @@ impl LanguageServer for MetalLanguageServer {
             Some(t) => t,
             None => return Ok(None),
         };
-        let tree = self
-            .document_trees
-            .get(&uri)
-            .unwrap_or_else(|| SyntaxTree::parse(&text));
+        let tree = self.document_trees.get(&uri).unwrap_or_else(|| SyntaxTree::parse(&text));
         let includes = self.include_paths(&uri).await;
 
-        let refs = self
-            .definition_provider
-            .provide_references(&uri, position, &text, &includes, &tree, true)
-            .await;
+        let refs = self.definition_provider.provide_references(&uri, position, &text, &includes, &tree, true);
 
         Ok(refs.map(|locs| {
             locs.into_iter()
+                .filter_map(ide_location_to_lsp)
                 .filter(|l| l.uri == uri)
                 .map(|l| DocumentHighlight {
                     range: l.range,
@@ -753,20 +695,17 @@ impl LanguageServer for MetalLanguageServer {
             Some(t) => t,
             None => return Ok(None),
         };
-        let tree = self
-            .document_trees
-            .get(&uri)
-            .unwrap_or_else(|| SyntaxTree::parse(&text));
+        let tree = self.document_trees.get(&uri).unwrap_or_else(|| SyntaxTree::parse(&text));
         let includes = self.include_paths(&uri).await;
 
-        let range = self
-            .definition_provider
-            .prepare_rename(&uri, position, &text, &includes, &tree)
-            .await;
-        Ok(range.map(PrepareRenameResponse::Range))
+        let range = self.definition_provider.prepare_rename(&uri, position, &text, &includes, &tree);
+        Ok(range.map(|r| PrepareRenameResponse::Range(ide_range_to_lsp(r))))
     }
 
-    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+    async fn rename(
+        &self,
+        params: RenameParams,
+    ) -> Result<Option<WorkspaceEdit>> {
         let uri = params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
         let new_name = params.new_name;
@@ -775,27 +714,20 @@ impl LanguageServer for MetalLanguageServer {
             Some(t) => t,
             None => return Ok(None),
         };
-        let tree = self
-            .document_trees
-            .get(&uri)
-            .unwrap_or_else(|| SyntaxTree::parse(&text));
+        let tree = self.document_trees.get(&uri).unwrap_or_else(|| SyntaxTree::parse(&text));
         let includes = self.include_paths(&uri).await;
 
-        let refs = self
-            .definition_provider
-            .provide_references(&uri, position, &text, &includes, &tree, true)
-            .await;
+        let refs = self.definition_provider.provide_references(&uri, position, &text, &includes, &tree, true);
 
-        if let Some(locations) = refs {
+        if let Some(ide_locations) = refs {
             let mut changes = std::collections::HashMap::new();
-            for loc in locations {
-                changes
-                    .entry(loc.uri)
-                    .or_insert_with(Vec::new)
-                    .push(TextEdit {
-                        range: loc.range,
+            for ide_loc in ide_locations {
+                if let Some(lsp_loc) = ide_location_to_lsp(ide_loc) {
+                    changes.entry(lsp_loc.uri).or_insert_with(Vec::new).push(TextEdit {
+                        range: lsp_loc.range,
                         new_text: new_name.clone(),
                     });
+                }
             }
             let edit = WorkspaceEdit {
                 changes: Some(changes),
@@ -810,11 +742,7 @@ impl LanguageServer for MetalLanguageServer {
 }
 
 fn short_name(uri: &Url) -> String {
-    uri.path()
-        .rsplit('/')
-        .next()
-        .unwrap_or(uri.path())
-        .to_owned()
+    uri.path().rsplit('/').next().unwrap_or(uri.path()).to_owned()
 }
 
 fn short_path(path: &str) -> &str {

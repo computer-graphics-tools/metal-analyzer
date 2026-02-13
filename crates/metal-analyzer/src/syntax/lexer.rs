@@ -1,5 +1,6 @@
-use crate::syntax::kind::{SyntaxKind, TokenKind};
 use logos::Logos;
+
+use crate::syntax::kind::{SyntaxKind, TokenKind};
 
 /// A lexer that wraps `logos::Lexer` to produce `SyntaxKind` tokens.
 pub struct Lexer<'a> {
