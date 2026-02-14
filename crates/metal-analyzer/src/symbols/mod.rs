@@ -1,7 +1,7 @@
-mod index;
-mod provider;
-mod scanner;
-mod types;
+pub(crate) mod index;
+pub(crate) mod provider;
+pub(crate) mod scanner;
+pub(crate) mod types;
 
 pub use index::SymbolIndex;
 pub use provider::SymbolProvider;

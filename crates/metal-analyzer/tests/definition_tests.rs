@@ -3,14 +3,8 @@ use metal_analyzer::{SymbolDef, def_to_location, is_system_header, normalize_typ
 #[test]
 fn normalize_type_name_strips_qualifiers() {
     assert_eq!(normalize_type_name("Foo"), Some("Foo".to_string()));
-    assert_eq!(
-        normalize_type_name("const struct Foo *"),
-        Some("Foo".to_string())
-    );
-    assert_eq!(
-        normalize_type_name("threadgroup metal::Foo &"),
-        Some("Foo".to_string())
-    );
+    assert_eq!(normalize_type_name("const struct Foo *"), Some("Foo".to_string()));
+    assert_eq!(normalize_type_name("threadgroup metal::Foo &"), Some("Foo".to_string()));
 }
 
 #[test]
@@ -53,5 +47,5 @@ fn def_to_location_converts_to_zero_based() {
     assert_eq!(loc.range.start.line, 2);
     assert_eq!(loc.range.start.character, 7);
     assert_eq!(loc.range.end.character, 10); // 7 + len("Foo")
-    assert_eq!(loc.uri.path(), "/tmp/test.metal");
+    assert_eq!(loc.file_path.to_string_lossy(), "/tmp/test.metal");
 }

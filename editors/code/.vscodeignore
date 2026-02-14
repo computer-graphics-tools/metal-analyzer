@@ -1,0 +1,9 @@
+**
+!icon.png
+!language-configuration.json
+!LICENSE
+!README.md
+!node_modules/**
+!out/**
+!package.json
+!syntaxes/**

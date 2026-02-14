@@ -1,7 +1,7 @@
 use dashmap::DashMap;
 use tower_lsp::lsp_types::{TextDocumentContentChangeEvent, Url};
 
-use super::Document;
+use crate::document::Document;
 
 /// Thread-safe store of all open documents.
 ///
@@ -20,22 +20,30 @@ impl DocumentStore {
     }
 
     /// Open (register) a new document.
-    pub fn open(&self, uri: Url, text: String, version: i32) {
-        self.documents
-            .insert(uri.clone(), Document::new(uri, text, version));
+    pub fn open(
+        &self,
+        uri: Url,
+        text: String,
+        version: i32,
+    ) {
+        self.documents.insert(uri.clone(), Document::new(uri, text, version));
     }
 
     /// Replace the full content of an already-open document.
     ///
     /// This is the API used by `did_change` with `TextDocumentSyncKind::FULL`
     /// and by `did_save` when `includeText` is enabled.
-    pub fn update(&self, uri: Url, text: String, version: i32) {
+    pub fn update(
+        &self,
+        uri: Url,
+        text: String,
+        version: i32,
+    ) {
         if let Some(mut doc) = self.documents.get_mut(&uri) {
             doc.set_content(text, version);
         } else {
             // Defensive: treat as open if not already tracked.
-            self.documents
-                .insert(uri.clone(), Document::new(uri, text, version));
+            self.documents.insert(uri.clone(), Document::new(uri, text, version));
         }
     }
 
@@ -53,18 +61,27 @@ impl DocumentStore {
     }
 
     /// Close (unregister) a document.
-    pub fn close(&self, uri: &Url) {
+    pub fn close(
+        &self,
+        uri: &Url,
+    ) {
         self.documents.remove(uri);
     }
 
     /// Return a clone of the full document text, if the URI is tracked.
-    pub fn get_content(&self, uri: &Url) -> Option<String> {
+    pub fn get_content(
+        &self,
+        uri: &Url,
+    ) -> Option<String> {
         self.documents.get(uri).map(|r| r.value().text.clone())
     }
 
     /// Return a clone of the full `Document`, if the URI is tracked.
     #[allow(dead_code)]
-    pub fn get(&self, uri: &Url) -> Option<Document> {
+    pub fn get(
+        &self,
+        uri: &Url,
+    ) -> Option<Document> {
         self.documents.get(uri).map(|r| r.value().clone())
     }
 

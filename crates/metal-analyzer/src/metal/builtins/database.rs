@@ -1,9 +1,6 @@
-use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::{collections::HashMap, sync::OnceLock};
 
-use super::functions;
-use super::keywords::KEYWORDS;
-use super::types::BuiltinEntry;
+use crate::metal::builtins::{functions, keywords::KEYWORDS, types::BuiltinEntry};
 
 static ALL_BUILTINS: OnceLock<Vec<BuiltinEntry>> = OnceLock::new();
 static BUILTIN_MAP: OnceLock<HashMap<String, usize>> = OnceLock::new();

@@ -3,7 +3,10 @@ use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind};
 use crate::symbols::SymbolLocation;
 
 /// Build a `Hover` from a user symbol lookup.
-pub(crate) async fn make_hover_from_user_symbol(word: &str, locations: &[SymbolLocation]) -> Hover {
+pub(crate) async fn make_hover_from_user_symbol(
+    word: &str,
+    locations: &[SymbolLocation],
+) -> Hover {
     let mut md = String::new();
     let mut found_snippet = false;
     let mut doc_comment = String::new();
@@ -70,10 +73,7 @@ pub(crate) async fn make_hover_from_user_symbol(word: &str, locations: &[SymbolL
 
         let line = loc.range.start.line + 1;
 
-        md.push_str(&format!(
-            "- [`{}:{}`]({}#L{})\n",
-            filename, line, loc.uri, line
-        ));
+        md.push_str(&format!("- [`{}:{}`]({}#L{})\n", filename, line, loc.uri, line));
     }
 
     if locations.len() > 5 {

@@ -6,9 +6,8 @@
 
 use std::path::PathBuf;
 
-use metal_analyzer::DefinitionProvider;
-use metal_analyzer::syntax::SyntaxTree;
-use tower_lsp::lsp_types::*;
+use metal_analyzer::{DefinitionProvider, IdeLocation, NavigationTarget, syntax::SyntaxTree};
+use tower_lsp::lsp_types::{Position, Url};
 
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
@@ -26,25 +25,15 @@ fn read_fixture(filename: &str) -> String {
     std::fs::read_to_string(fixtures_dir().join(filename)).unwrap()
 }
 
-fn extract_location(resp: GotoDefinitionResponse) -> Location {
+fn extract_location(resp: NavigationTarget) -> IdeLocation {
     match resp {
-        GotoDefinitionResponse::Scalar(loc) => loc,
-        GotoDefinitionResponse::Array(locs) => locs.into_iter().next().unwrap(),
-        GotoDefinitionResponse::Link(links) => {
-            let link = links.into_iter().next().unwrap();
-            Location {
-                uri: link.target_uri,
-                range: link.target_selection_range,
-            }
-        }
+        NavigationTarget::Single(loc) => loc,
+        NavigationTarget::Multiple(locs) => locs.into_iter().next().expect("at least one location"),
     }
 }
 
 fn has_metal_compiler() -> bool {
-    std::process::Command::new("xcrun")
-        .args(["--find", "metal"])
-        .output()
-        .is_ok_and(|o| o.status.success())
+    std::process::Command::new("xcrun").args(["--find", "metal"]).output().is_ok_and(|o| o.status.success())
 }
 
 // ---------------------------------------------------------------------------
@@ -55,8 +44,8 @@ fn has_metal_compiler() -> bool {
 ///
 /// functions.metal line 14: `transform(data[id].position, params->scale)`
 /// functions.metal line  5: `float4 transform(float4 pos, float scale) {`
-#[tokio::test]
-async fn goto_def_function_in_same_file() {
+#[test]
+fn goto_def_function_in_same_file() {
     if !has_metal_compiler() {
         return;
     }
@@ -67,14 +56,19 @@ async fn goto_def_function_in_same_file() {
     let provider = DefinitionProvider::new();
 
     // "transform" call is at line 14, column 18
-    let position = Position { line: 14, character: 18 };
+    let position = Position {
+        line: 14,
+        character: 18,
+    };
 
-    let result = provider
-        .provide(&uri, position, &source, &include_paths(), &snapshot)
-        .await;
+    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot, || false);
 
     let loc = extract_location(result.expect("expected a definition for 'transform'"));
-    assert_eq!(loc.uri.path(), uri.path(), "should resolve to same file");
+    assert_eq!(
+        loc.file_path,
+        uri.to_file_path().expect("fixture uri should be a file path"),
+        "should resolve to same file"
+    );
     assert_eq!(loc.range.start.line, 5, "transform is defined at line 5 (0-indexed)");
 }
 
@@ -82,8 +76,8 @@ async fn goto_def_function_in_same_file() {
 ///
 /// functions.metal line 10: `device MyStruct* data`
 /// types.metal     line 10: `struct MyStruct {`
-#[tokio::test]
-async fn goto_def_struct_in_included_file() {
+#[test]
+fn goto_def_struct_in_included_file() {
     if !has_metal_compiler() {
         return;
     }
@@ -94,21 +88,20 @@ async fn goto_def_struct_in_included_file() {
     let provider = DefinitionProvider::new();
 
     // Pre-index so we can inspect the AST index.
-    provider
-        .index_document(&uri, &source, &include_paths())
-        .await;
+    provider.index_document(&uri, &source, &include_paths());
     // "MyStruct" at line 10, column 11
-    let position = Position { line: 10, character: 11 };
+    let position = Position {
+        line: 10,
+        character: 11,
+    };
 
-    let result = provider
-        .provide(&uri, position, &source, &include_paths(), &snapshot)
-        .await;
+    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot, || false);
 
     let loc = extract_location(result.expect("expected a definition for 'MyStruct'"));
     assert!(
-        loc.uri.path().ends_with("types.metal"),
+        loc.file_path.to_string_lossy().ends_with("types.metal"),
         "should resolve to types.metal, got: {}",
-        loc.uri.path()
+        loc.file_path.display()
     );
     assert_eq!(loc.range.start.line, 10, "MyStruct defined at line 10 in types.metal");
 }
@@ -117,8 +110,8 @@ async fn goto_def_struct_in_included_file() {
 ///
 /// functions.metal line 11: `const constant MyParams* params`
 /// types.metal     line  4: `struct MyParams {`
-#[tokio::test]
-async fn goto_def_struct_cross_file_via_include() {
+#[test]
+fn goto_def_struct_cross_file_via_include() {
     if !has_metal_compiler() {
         return;
     }
@@ -129,17 +122,18 @@ async fn goto_def_struct_cross_file_via_include() {
     let provider = DefinitionProvider::new();
 
     // "MyParams" at line 11, column 19
-    let position = Position { line: 11, character: 19 };
+    let position = Position {
+        line: 11,
+        character: 19,
+    };
 
-    let result = provider
-        .provide(&uri, position, &source, &include_paths(), &snapshot)
-        .await;
+    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot, || false);
 
     let loc = extract_location(result.expect("expected a definition for 'MyParams'"));
     assert!(
-        loc.uri.path().ends_with("types.metal"),
+        loc.file_path.to_string_lossy().ends_with("types.metal"),
         "should resolve to types.metal, got: {}",
-        loc.uri.path()
+        loc.file_path.display()
     );
     assert_eq!(loc.range.start.line, 4, "MyParams defined at line 4 in types.metal");
 }
@@ -149,8 +143,8 @@ async fn goto_def_struct_cross_file_via_include() {
 /// functions.metal line 11: `const constant MyParams* params`
 /// cursor on `*`
 /// types.metal     line  4: `struct MyParams {`
-#[tokio::test]
-async fn goto_def_struct_cross_file_when_cursor_on_pointer_star() {
+#[test]
+fn goto_def_struct_cross_file_when_cursor_on_pointer_star() {
     if !has_metal_compiler() {
         return;
     }
@@ -166,23 +160,21 @@ async fn goto_def_struct_cross_file_when_cursor_on_pointer_star() {
         character: 27,
     };
 
-    let result = provider
-        .provide(&uri, position, &source, &include_paths(), &snapshot)
-        .await;
+    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot, || false);
 
     let loc = extract_location(result.expect("expected a definition for 'MyParams'"));
     assert!(
-        loc.uri.path().ends_with("types.metal"),
+        loc.file_path.to_string_lossy().ends_with("types.metal"),
         "should resolve to types.metal, got: {}",
-        loc.uri.path()
+        loc.file_path.display()
     );
     assert_eq!(loc.range.start.line, 4, "MyParams defined at line 4 in types.metal");
 }
 
 /// `MissingType` only exists in a header that doesn't exist on disk.
 /// The provider should return `None` rather than a false positive.
-#[tokio::test]
-async fn goto_def_missing_type_returns_none() {
+#[test]
+fn goto_def_missing_type_returns_none() {
     if !has_metal_compiler() {
         return;
     }
@@ -193,16 +185,14 @@ async fn goto_def_missing_type_returns_none() {
     let provider = DefinitionProvider::new();
 
     // "MissingType" at line 8, column 19
-    let position = Position { line: 8, character: 19 };
+    let position = Position {
+        line: 8,
+        character: 19,
+    };
 
-    let result = provider
-        .provide(&uri, position, &source, &include_paths(), &snapshot)
-        .await;
+    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot, || false);
 
-    assert!(
-        result.is_none(),
-        "should return None for a type from a missing header, got: {result:?}"
-    );
+    assert!(result.is_none(), "should return None for a type from a missing header, got: {result:?}");
 }
 
 /// In a file with a missing include, symbols from headers included BEFORE
@@ -210,8 +200,8 @@ async fn goto_def_missing_type_returns_none() {
 ///
 /// missing_include.metal line 7: `device MyStruct* data`  (types.metal is included before nonexistent.h)
 /// types.metal           line 10: `struct MyStruct {`
-#[tokio::test]
-async fn goto_def_partial_ast_valid_symbol_resolves() {
+#[test]
+fn goto_def_partial_ast_valid_symbol_resolves() {
     if !has_metal_compiler() {
         return;
     }
@@ -222,11 +212,12 @@ async fn goto_def_partial_ast_valid_symbol_resolves() {
     let provider = DefinitionProvider::new();
 
     // "MyStruct" at line 7, column 11
-    let position = Position { line: 7, character: 11 };
+    let position = Position {
+        line: 7,
+        character: 11,
+    };
 
-    let result = provider
-        .provide(&uri, position, &source, &include_paths(), &snapshot)
-        .await;
+    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot, || false);
 
     // This may or may not work depending on whether the partial AST
     // contains the included types. If it does, verify correctness.
@@ -234,17 +225,17 @@ async fn goto_def_partial_ast_valid_symbol_resolves() {
     if let Some(resp) = result {
         let loc = extract_location(resp);
         assert!(
-            loc.uri.path().ends_with("types.metal"),
+            loc.file_path.to_string_lossy().ends_with("types.metal"),
             "if resolved, should point to types.metal, got: {}",
-            loc.uri.path()
+            loc.file_path.display()
         );
     }
 }
 
 /// Go-to-definition on a symbol passed through a macro invocation should
 /// resolve via expansion/spelling-aware precise matching.
-#[tokio::test]
-async fn goto_def_symbol_in_macro_invocation() {
+#[test]
+fn goto_def_symbol_in_macro_invocation() {
     if !has_metal_compiler() {
         return;
     }
@@ -260,22 +251,21 @@ async fn goto_def_symbol_in_macro_invocation() {
         character: 22,
     };
 
-    let result = provider
-        .provide(&uri, position, &source, &include_paths(), &snapshot)
-        .await;
+    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot, || false);
 
     let loc = extract_location(result.expect("expected definition for 'my_min'"));
-    assert_eq!(loc.uri.path(), uri.path(), "should resolve in same file");
     assert_eq!(
-        loc.range.start.line, 4,
-        "my_min is defined at line 5 (0-indexed 4)"
+        loc.file_path,
+        uri.to_file_path().expect("fixture uri should be a file path"),
+        "should resolve in same file"
     );
+    assert_eq!(loc.range.start.line, 4, "my_min is defined at line 5 (0-indexed 4)");
 }
 
 /// If by-name fallback is ambiguous (same-rank candidates), provider should
 /// return None instead of a potentially wrong deterministic jump.
-#[tokio::test]
-async fn goto_def_ambiguous_name_fallback_returns_none() {
+#[test]
+fn goto_def_ambiguous_name_fallback_returns_none() {
     if !has_metal_compiler() {
         return;
     }
@@ -291,12 +281,7 @@ async fn goto_def_ambiguous_name_fallback_returns_none() {
         character: 7,
     };
 
-    let result = provider
-        .provide(&uri, position, &source, &include_paths(), &snapshot)
-        .await;
+    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot, || false);
 
-    assert!(
-        result.is_none(),
-        "ambiguous fallback should return None, got: {result:?}"
-    );
+    assert!(result.is_none(), "ambiguous fallback should return None, got: {result:?}");
 }

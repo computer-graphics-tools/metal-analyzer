@@ -1,5 +1,5 @@
-mod builtins;
-mod context;
-mod provider;
+pub(crate) mod builtins;
+pub(crate) mod context;
+pub(crate) mod provider;
 
 pub use self::provider::CompletionProvider;

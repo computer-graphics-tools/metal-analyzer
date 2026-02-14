@@ -1,11 +1,16 @@
 use tower_lsp::lsp_types::{DocumentSymbol, SymbolKind};
 
-use crate::syntax::ast::{self, AstNode};
-use crate::syntax::cst::SyntaxNode;
-use crate::syntax::helpers;
-use crate::syntax::kind::SyntaxKind;
+use crate::syntax::{
+    ast::{self, AstNode},
+    cst::SyntaxNode,
+    helpers,
+    kind::SyntaxKind,
+};
 
-pub(crate) fn build_symbols(root: &SyntaxNode, text: &str) -> Vec<DocumentSymbol> {
+pub(crate) fn build_symbols(
+    root: &SyntaxNode,
+    text: &str,
+) -> Vec<DocumentSymbol> {
     let mut symbols = Vec::new();
 
     for node in root.descendants() {
@@ -69,20 +74,21 @@ pub(crate) fn build_symbols(root: &SyntaxNode, text: &str) -> Vec<DocumentSymbol
         }
 
         if let Some(def) = ast::TemplateParameter::cast(node.clone())
-            && let Some(name) = def.name_token() {
-                let range = helpers::range_to_lsp(name.text_range(), text);
-                symbols.push(DocumentSymbol {
-                    name: name.text().to_string(),
-                    detail: Some("template param".to_string()),
-                    kind: SymbolKind::TYPE_PARAMETER,
-                    tags: None,
-                    #[allow(deprecated)]
-                    deprecated: None,
-                    range,
-                    selection_range: range,
-                    children: None,
-                });
-            }
+            && let Some(name) = def.name_token()
+        {
+            let range = helpers::range_to_lsp(name.text_range(), text);
+            symbols.push(DocumentSymbol {
+                name: name.text().to_string(),
+                detail: Some("template param".to_string()),
+                kind: SymbolKind::TYPE_PARAMETER,
+                tags: None,
+                #[allow(deprecated)]
+                deprecated: None,
+                range,
+                selection_range: range,
+                children: None,
+            });
+        }
 
         if let Some(def) = ast::PreprocDefine::cast(node.clone()) {
             let symbol = named_symbol(def.syntax(), text, SymbolKind::CONSTANT, "macro");
@@ -104,7 +110,11 @@ pub(crate) fn build_symbols(root: &SyntaxNode, text: &str) -> Vec<DocumentSymbol
     symbols
 }
 
-fn struct_symbol(def: &ast::StructDef, text: &str, kind: SymbolKind) -> Option<DocumentSymbol> {
+fn struct_symbol(
+    def: &ast::StructDef,
+    text: &str,
+    kind: SymbolKind,
+) -> Option<DocumentSymbol> {
     let name = def.name_token()?;
     let range = helpers::range_to_lsp(name.text_range(), text);
     let mut children = Vec::new();
@@ -142,19 +152,15 @@ fn struct_symbol(def: &ast::StructDef, text: &str, kind: SymbolKind) -> Option<D
     })
 }
 
-fn enum_symbol(def: &ast::EnumDef, text: &str) -> Option<DocumentSymbol> {
+fn enum_symbol(
+    def: &ast::EnumDef,
+    text: &str,
+) -> Option<DocumentSymbol> {
     let name = def.name_token()?;
     let range = helpers::range_to_lsp(name.text_range(), text);
     let mut children = Vec::new();
-    if let Some(block) = def
-        .syntax()
-        .children()
-        .find(|n| n.kind() == SyntaxKind::Block)
-    {
-        for token in block
-            .descendants_with_tokens()
-            .filter_map(|e| e.into_token())
-        {
+    if let Some(block) = def.syntax().children().find(|n| n.kind() == SyntaxKind::Block) {
+        for token in block.descendants_with_tokens().filter_map(|e| e.into_token()) {
             if token.kind() == SyntaxKind::Ident {
                 let tok_range = helpers::range_to_lsp(token.text_range(), text);
                 children.push(DocumentSymbol {
@@ -195,10 +201,7 @@ fn named_symbol(
     kind: SymbolKind,
     prefix: &str,
 ) -> Option<DocumentSymbol> {
-    let name = syntax
-        .children_with_tokens()
-        .filter_map(|e| e.into_token())
-        .find(|t| t.kind() == SyntaxKind::Ident)?;
+    let name = syntax.children_with_tokens().filter_map(|e| e.into_token()).find(|t| t.kind() == SyntaxKind::Ident)?;
     let range = helpers::range_to_lsp(name.text_range(), text);
     Some(DocumentSymbol {
         name: name.text().to_string(),
@@ -214,11 +217,8 @@ fn named_symbol(
 }
 
 fn detect_function_detail(func: &ast::FunctionDef) -> String {
-    let qualifier = func
-        .syntax()
-        .children_with_tokens()
-        .filter_map(|e| e.into_token())
-        .find_map(|token| match token.kind() {
+    let qualifier =
+        func.syntax().children_with_tokens().filter_map(|e| e.into_token()).find_map(|token| match token.kind() {
             SyntaxKind::KwKernel => Some("kernel"),
             SyntaxKind::KwVertex => Some("vertex"),
             SyntaxKind::KwFragment => Some("fragment"),
@@ -227,10 +227,7 @@ fn detect_function_detail(func: &ast::FunctionDef) -> String {
             _ => None,
         });
 
-    let name = func
-        .name_token()
-        .map(|t| t.text().to_string())
-        .unwrap_or_default();
+    let name = func.name_token().map(|t| t.text().to_string()).unwrap_or_default();
 
     match qualifier {
         Some(q) => format!("{q} ... {name}(...)"),

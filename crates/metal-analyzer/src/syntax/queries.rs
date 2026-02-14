@@ -1,5 +1,4 @@
-use crate::syntax::cst::SyntaxToken;
-use crate::syntax::kind::SyntaxKind;
+use crate::syntax::{cst::SyntaxToken, kind::SyntaxKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenClass {

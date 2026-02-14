@@ -3,8 +3,7 @@ mod common;
 use std::sync::Arc;
 
 use common::{fixture_path, fixture_uri, has_metal_compiler, include_paths_for, position_of, read_fixture};
-use metal_analyzer::syntax::SyntaxTree;
-use metal_analyzer::{DefinitionProvider, HoverProvider, SymbolProvider};
+use metal_analyzer::{DefinitionProvider, HoverProvider, SymbolProvider, syntax::SyntaxTree};
 use tower_lsp::lsp_types::{HoverContents, MarkedString};
 
 fn marked_string_text(marked: &MarkedString) -> String {
@@ -18,16 +17,12 @@ fn hover_text(contents: &HoverContents) -> String {
     match contents {
         HoverContents::Markup(markup) => markup.value.clone(),
         HoverContents::Scalar(s) => marked_string_text(s),
-        HoverContents::Array(items) => items
-            .iter()
-            .map(marked_string_text)
-            .collect::<Vec<_>>()
-            .join("\n"),
+        HoverContents::Array(items) => items.iter().map(marked_string_text).collect::<Vec<_>>().join("\n"),
     }
 }
 
-#[tokio::test]
-async fn references_include_cross_file_uses_for_shared_symbol() {
+#[test]
+fn references_include_cross_file_uses_for_shared_symbol() {
     if !has_metal_compiler() {
         return;
     }
@@ -37,15 +32,11 @@ async fn references_include_cross_file_uses_for_shared_symbol() {
     let file_b = "matmul/gemv/shaders/ref_user_b.metal";
 
     assert!(
-        provider
-            .index_workspace_file(&fixture_path(file_a), &include_paths_for(file_a))
-            .await,
+        provider.index_workspace_file(&fixture_path(file_a), &include_paths_for(file_a)),
         "expected indexing success for {file_a}"
     );
     assert!(
-        provider
-            .index_workspace_file(&fixture_path(file_b), &include_paths_for(file_b))
-            .await,
+        provider.index_workspace_file(&fixture_path(file_b), &include_paths_for(file_b)),
         "expected indexing success for {file_b}"
     );
 
@@ -58,9 +49,8 @@ async fn references_include_cross_file_uses_for_shared_symbol() {
 
     let refs = provider
         .provide_references(&uri, position, &source, &include_paths, &snapshot, true)
-        .await
         .expect("expected references for shared_mul");
-    let paths: Vec<String> = refs.iter().map(|loc| loc.uri.path().to_string()).collect();
+    let paths: Vec<String> = refs.iter().map(|loc| loc.file_path.to_string_lossy().to_string()).collect();
 
     assert!(
         paths.iter().any(|p| p.ends_with("/common/math_ops.h")),
@@ -76,8 +66,8 @@ async fn references_include_cross_file_uses_for_shared_symbol() {
     );
 }
 
-#[tokio::test]
-async fn prepare_rename_allows_project_symbol() {
+#[test]
+fn prepare_rename_allows_project_symbol() {
     if !has_metal_compiler() {
         return;
     }
@@ -88,13 +78,11 @@ async fn prepare_rename_allows_project_symbol() {
     let uri = fixture_uri(rel);
     let snapshot = SyntaxTree::parse(&source);
     let include_paths = include_paths_for(rel);
-    provider.index_document(&uri, &source, &include_paths).await;
+    provider.index_document(&uri, &source, &include_paths);
 
     let mut position = position_of(&source, "fixture::shared_mul");
     position.character += "fixture::".len() as u32;
-    let rename_range = provider
-        .prepare_rename(&uri, position, &source, &include_paths, &snapshot)
-        .await;
+    let rename_range = provider.prepare_rename(&uri, position, &source, &include_paths, &snapshot);
 
     assert!(rename_range.is_some(), "expected rename range for shared_mul");
 }
@@ -117,10 +105,7 @@ async fn hover_handles_attribute_in_realistic_fixture() {
         .expect("expected hover for buffer attribute");
     let text = hover_text(&hover.contents);
 
-    assert!(
-        text.contains("buffer"),
-        "hover should include buffer attribute help, got: {text}"
-    );
+    assert!(text.contains("buffer"), "hover should include buffer attribute help, got: {text}");
 }
 
 #[test]
@@ -130,10 +115,7 @@ fn symbol_extraction_keeps_kernel_and_template_symbols() {
     let symbols = provider.extract_symbols(&source);
     let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
 
-    assert!(
-        names.contains(&"gemv_like"),
-        "expected kernel symbol gemv_like, got: {names:?}"
-    );
+    assert!(names.contains(&"gemv_like"), "expected kernel symbol gemv_like, got: {names:?}");
     assert!(
         names.contains(&"MTL_CONST"),
         "expected macro symbol MTL_CONST in realistic shader fixture, got: {names:?}"

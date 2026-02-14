@@ -84,7 +84,7 @@ Example:
 3. Hover a known symbol or trigger completion.
 4. Save to trigger diagnostics.
 
-If features are still inactive, check `View -> Output` and select `Metal Analyzer` in the output channel.
+If features are still inactive, check `View -> Output` and select `metal-analyzer` in the output channel.
 
 ## Diagnostics Source Troubleshooting
 

@@ -1,6 +1,11 @@
-use std::collections::{BTreeSet, HashSet};
-use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::Ordering;
+use std::{
+    collections::{BTreeSet, HashSet},
+    panic::AssertUnwindSafe,
+    path::{Component, Path, PathBuf},
+    sync::atomic::Ordering,
+};
+
+use futures::FutureExt;
 
 use dashmap::DashMap;
 use tower_lsp::lsp_types::{
@@ -9,47 +14,43 @@ use tower_lsp::lsp_types::{
 use tracing::{debug, info, warn};
 use walkdir::{DirEntry, WalkDir};
 
-use crate::progress::ProgressToken;
-use crate::metal::compiler::MetalDiagnostic;
-
-use super::state::MetalLanguageServer;
-use super::header_owners::{
-    collect_included_headers, get_owner_candidates_for_header, is_header_file, normalize_path,
-    update_owner_links,
+use crate::{
+    metal::compiler::MetalDiagnostic,
+    progress::ProgressToken,
+    server::{
+        header_owners::{
+            collect_included_headers, get_owner_candidates_for_header, is_header_file, normalize_path,
+            update_owner_links,
+        },
+        settings::ServerSettings,
+        state::MetalLanguageServer,
+    },
 };
-use super::settings::ServerSettings;
 
 const HEADER_OWNER_COMPILE_CAP: usize = 256;
 
 impl MetalLanguageServer {
     /// Run the Metal compiler on the document identified by `uri` and publish
     /// the resulting diagnostics to the client.
-    pub(crate) async fn run_diagnostics(&self, uri: &Url) {
+    pub(crate) async fn run_diagnostics(
+        &self,
+        uri: &Url,
+    ) {
         let document = match self.document_store.get(uri) {
             Some(d) => d,
             None => {
                 warn!("run_diagnostics called for unknown document: {uri}");
                 return;
-            }
+            },
         };
         let text = document.text;
         let version = document.version;
 
         let generation = next_diagnostic_generation(&self.diagnostics_generation, uri);
-        let workspace_roots: Vec<PathBuf> = self
-            .workspace_roots
-            .read()
-            .await
-            .iter()
-            .filter_map(|f| f.uri.to_file_path().ok())
-            .collect();
+        let workspace_roots: Vec<PathBuf> =
+            self.workspace_roots.read().await.iter().filter_map(|f| f.uri.to_file_path().ok()).collect();
 
-        let progress = ProgressToken::begin(
-            &self.client,
-            "Diagnostics",
-            Some("Running compiler…".into()),
-        )
-        .await;
+        let progress = ProgressToken::begin(&self.client, "Diagnostics", Some("Running compiler…".into())).await;
         let workspace_generation = self.workspace_generation.load(Ordering::Relaxed);
 
         let diagnostics = compile_filtered_diagnostics_for_document(
@@ -73,12 +74,14 @@ impl MetalLanguageServer {
 
         debug!("Publishing {count} diagnostic(s) for {uri} (v{version}, generation={generation})");
 
-        self.diagnostics_cache
-            .insert(uri.clone(), diagnostics.clone());
+        self.diagnostics_cache.insert(uri.clone(), diagnostics.clone());
 
-        self.client
-            .publish_diagnostics(uri.clone(), diagnostics, Some(version))
+        let result = AssertUnwindSafe(self.client.publish_diagnostics(uri.clone(), diagnostics, Some(version)))
+            .catch_unwind()
             .await;
+        if result.is_err() {
+            warn!("publish_diagnostics panicked (client may have disconnected)");
+        }
 
         let end_msg = match count {
             0 => "No issues found".to_owned(),
@@ -94,14 +97,12 @@ impl MetalLanguageServer {
     /// - Ancestors of the file's directory (up to workspace roots)
     /// - Immediate child directories of those ancestors (e.g., `generated/`, `common/`)
     /// - System include paths from the compiler
-    pub(crate) async fn include_paths(&self, uri: &Url) -> Vec<String> {
-        let workspace_roots: Vec<PathBuf> = self
-            .workspace_roots
-            .read()
-            .await
-            .iter()
-            .filter_map(|f| f.uri.to_file_path().ok())
-            .collect();
+    pub(crate) async fn include_paths(
+        &self,
+        uri: &Url,
+    ) -> Vec<String> {
+        let workspace_roots: Vec<PathBuf> =
+            self.workspace_roots.read().await.iter().filter_map(|f| f.uri.to_file_path().ok()).collect();
         let workspace_generation = self.workspace_generation.load(Ordering::Relaxed);
         compute_include_paths_for_uri_cached(
             &self.compiler,
@@ -114,23 +115,23 @@ impl MetalLanguageServer {
     }
 
     /// Clear any previously published diagnostics for a document.
-    pub(crate) async fn clear_diagnostics(&self, uri: &Url) {
+    pub(crate) async fn clear_diagnostics(
+        &self,
+        uri: &Url,
+    ) {
         self.diagnostics_cache.remove(uri);
         self.diagnostics_generation.remove(uri);
-        self.client
-            .publish_diagnostics(uri.clone(), Vec::new(), None)
-            .await;
+        let result =
+            AssertUnwindSafe(self.client.publish_diagnostics(uri.clone(), Vec::new(), None)).catch_unwind().await;
+        if result.is_err() {
+            warn!("publish_diagnostics panicked (client may have disconnected)");
+        }
     }
 
     /// Create a lightweight handle suitable for passing into `tokio::spawn`.
     pub(crate) async fn clone_for_background(&self) -> BackgroundHandle {
-        let workspace_roots = self
-            .workspace_roots
-            .read()
-            .await
-            .iter()
-            .filter_map(|f| f.uri.to_file_path().ok())
-            .collect();
+        let workspace_roots =
+            self.workspace_roots.read().await.iter().filter_map(|f| f.uri.to_file_path().ok()).collect();
         BackgroundHandle {
             client: self.client.clone(),
             compiler: self.compiler.clone(),
@@ -140,6 +141,7 @@ impl MetalLanguageServer {
             header_owners: self.header_owners.clone(),
             owner_headers: self.owner_headers.clone(),
             include_paths_cache: self.include_paths_cache.clone(),
+            diagnostics_generation: self.diagnostics_generation.clone(),
             workspace_generation: self.workspace_generation.load(Ordering::Relaxed),
             settings: self.settings.clone(),
         }
@@ -158,6 +160,7 @@ pub(crate) struct BackgroundHandle {
     header_owners: std::sync::Arc<DashMap<PathBuf, std::collections::BTreeSet<PathBuf>>>,
     owner_headers: std::sync::Arc<DashMap<PathBuf, std::collections::BTreeSet<PathBuf>>>,
     include_paths_cache: std::sync::Arc<DashMap<PathBuf, (u64, Vec<String>)>>,
+    diagnostics_generation: std::sync::Arc<DashMap<Url, u64>>,
     workspace_generation: u64,
     settings: std::sync::Arc<tokio::sync::RwLock<ServerSettings>>,
 }
@@ -166,7 +169,7 @@ impl BackgroundHandle {
     /// Scan workspace `.metal` files for indexing and diagnostics.
     pub async fn index_workspace(&self) {
         let settings = self.settings.read().await.clone();
-        let indexing_enabled = settings.indexing.enabled;
+        let indexing_enabled = settings.indexing.enable;
         let workspace_diagnostics_enabled = settings.diagnostics.scope.is_workspace();
         if !indexing_enabled && !workspace_diagnostics_enabled {
             info!(
@@ -178,10 +181,8 @@ impl BackgroundHandle {
 
         self.compiler.ensure_system_includes_ready().await;
         let max_indexed_file_size = settings.indexing.max_file_size_bytes();
-        let excluded_prefixes = build_workspace_scan_exclude_prefixes(
-            &self.workspace_roots,
-            &settings.indexing.exclude_paths,
-        );
+        let excluded_prefixes =
+            build_workspace_scan_exclude_prefixes(&self.workspace_roots, &settings.indexing.exclude_paths);
         let metal_files = self.discover_metal_files(max_indexed_file_size, &excluded_prefixes);
         let total = metal_files.len();
         if total == 0 {
@@ -200,15 +201,14 @@ impl BackgroundHandle {
         }
     }
 
-    async fn run_workspace_indexing(&self, settings: &ServerSettings, metal_files: &[PathBuf]) {
+    async fn run_workspace_indexing(
+        &self,
+        settings: &ServerSettings,
+        metal_files: &[PathBuf],
+    ) {
         let total = metal_files.len();
         info!("Indexing {total} .metal file(s) in workspace…");
-        let progress = ProgressToken::begin(
-            &self.client,
-            "Indexing",
-            Some(format!("0 / {total} files")),
-        )
-        .await;
+        let progress = ProgressToken::begin(&self.client, "Indexing", Some(format!("0 / {total} files"))).await;
 
         let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(settings.indexing.concurrency));
         let indexed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -231,7 +231,7 @@ impl BackgroundHandle {
                     let headers = collect_included_headers(&path, &source, &include_paths);
                     update_owner_links(&header_owners, &owner_headers, &path, headers);
                 }
-                let ok = provider.index_workspace_file(&path, &include_paths).await;
+                let ok = provider.index_workspace_file(&path, &include_paths);
                 count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 (path, ok)
             }));
@@ -241,9 +241,7 @@ impl BackgroundHandle {
             if let Ok((path, ok)) = handle.await {
                 let done = indexed.load(std::sync::atomic::Ordering::Relaxed);
                 if done % 5 == 0 || done == total {
-                    progress
-                        .report(Some(format!("{done} / {total} files")), Some((done * 100 / total) as u32))
-                        .await;
+                    progress.report(Some(format!("{done} / {total} files")), Some((done * 100 / total) as u32)).await;
                 }
                 if !ok {
                     debug!("Failed to index: {}", path.display());
@@ -253,20 +251,17 @@ impl BackgroundHandle {
 
         let count = self.definition_provider.project_index().file_count();
         info!("Project index complete: {count} file(s) indexed");
-        progress
-            .end(Some(format!("{count} file(s) indexed")))
-            .await;
+        progress.end(Some(format!("{count} file(s) indexed"))).await;
     }
 
-    async fn run_workspace_diagnostics(&self, settings: &ServerSettings, metal_files: &[PathBuf]) {
+    async fn run_workspace_diagnostics(
+        &self,
+        settings: &ServerSettings,
+        metal_files: &[PathBuf],
+    ) {
         let total = metal_files.len();
         info!("Analyzing diagnostics for {total} .metal file(s) in workspace…");
-        let progress = ProgressToken::begin(
-            &self.client,
-            "Diagnostics",
-            Some(format!("0 / {total} files")),
-        )
-        .await;
+        let progress = ProgressToken::begin(&self.client, "Diagnostics", Some(format!("0 / {total} files"))).await;
 
         let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(settings.indexing.concurrency));
         let processed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -281,6 +276,7 @@ impl BackgroundHandle {
             let include_paths_cache = self.include_paths_cache.clone();
             let workspace_generation = self.workspace_generation;
             let open_documents = self.document_store.clone();
+            let diagnostics_generation = self.diagnostics_generation.clone();
             let client = self.client.clone();
             let count = processed.clone();
 
@@ -295,6 +291,7 @@ impl BackgroundHandle {
                     &include_paths_cache,
                     workspace_generation,
                     &open_documents,
+                    &diagnostics_generation,
                     path,
                 )
                 .await;
@@ -310,9 +307,7 @@ impl BackgroundHandle {
             if let Ok(result) = handle.await {
                 let done = processed.load(std::sync::atomic::Ordering::Relaxed);
                 if done % 5 == 0 || done == total {
-                    progress
-                        .report(Some(format!("{done} / {total} files")), Some((done * 100 / total) as u32))
-                        .await;
+                    progress.report(Some(format!("{done} / {total} files")), Some((done * 100 / total) as u32)).await;
                 }
 
                 if result.skipped_open_document {
@@ -354,9 +349,7 @@ impl BackgroundHandle {
             for entry in WalkDir::new(root)
                 .follow_links(true)
                 .into_iter()
-                .filter_entry(|entry| {
-                    should_descend_into_workspace_entry(entry, excluded_prefixes)
-                })
+                .filter_entry(|entry| should_descend_into_workspace_entry(entry, excluded_prefixes))
                 .filter_map(|e| e.ok())
             {
                 if !entry.file_type().is_file() {
@@ -371,11 +364,7 @@ impl BackgroundHandle {
                 if let Ok(metadata) = entry.metadata()
                     && metadata.len() > max_file_size_bytes
                 {
-                    debug!(
-                        "Skipping large workspace shader file ({} bytes): {}",
-                        metadata.len(),
-                        path.display()
-                    );
+                    debug!("Skipping large workspace shader file ({} bytes): {}", metadata.len(), path.display());
                     continue;
                 }
 
@@ -405,6 +394,7 @@ async fn publish_workspace_diagnostics_for_file(
     include_paths_cache: &DashMap<PathBuf, (u64, Vec<String>)>,
     workspace_generation: u64,
     open_documents: &crate::document::DocumentStore,
+    diagnostics_generation: &DashMap<Url, u64>,
     path: PathBuf,
 ) -> WorkspaceDiagnosticsFileResult {
     let Some(uri) = Url::from_file_path(&path).ok() else {
@@ -416,7 +406,10 @@ async fn publish_workspace_diagnostics_for_file(
         };
     };
 
-    if open_documents.get(&uri).is_some() {
+    // Only skip open files if didOpen/didChange already claimed them
+    // (i.e. a diagnostics generation entry exists). Otherwise the file
+    // was opened but never got diagnostics — we should still analyze it.
+    if open_documents.get(&uri).is_some() && diagnostics_generation.get(&uri).is_some() {
         return WorkspaceDiagnosticsFileResult {
             path,
             published: false,
@@ -425,13 +418,21 @@ async fn publish_workspace_diagnostics_for_file(
         };
     }
 
-    let Ok(source) = tokio::fs::read_to_string(&path).await else {
-        return WorkspaceDiagnosticsFileResult {
-            path,
-            published: false,
-            skipped_open_document: false,
-            diagnostic_count: 0,
-        };
+    // Prefer in-memory content for open files, fall back to disk.
+    let source = if let Some(text) = open_documents.get_content(&uri) {
+        text
+    } else {
+        match tokio::fs::read_to_string(&path).await {
+            Ok(s) => s,
+            Err(_) => {
+                return WorkspaceDiagnosticsFileResult {
+                    path,
+                    published: false,
+                    skipped_open_document: false,
+                    diagnostic_count: 0,
+                };
+            },
+        }
     };
 
     let diagnostics = compile_filtered_diagnostics_for_document(
@@ -447,16 +448,22 @@ async fn publish_workspace_diagnostics_for_file(
     .await;
     let diagnostic_count = diagnostics.len();
 
-    client.publish_diagnostics(uri, diagnostics, None).await;
+    let result = AssertUnwindSafe(client.publish_diagnostics(uri, diagnostics, None)).catch_unwind().await;
+    if result.is_err() {
+        warn!("publish_diagnostics panicked (client may have disconnected)");
+    }
     WorkspaceDiagnosticsFileResult {
         path,
-        published: true,
+        published: result.is_ok(),
         skipped_open_document: false,
         diagnostic_count,
     }
 }
 
-fn should_descend_into_workspace_entry(entry: &DirEntry, excluded_prefixes: &[PathBuf]) -> bool {
+fn should_descend_into_workspace_entry(
+    entry: &DirEntry,
+    excluded_prefixes: &[PathBuf],
+) -> bool {
     let normalized = normalize_path(entry.path());
     if is_path_excluded(&normalized, excluded_prefixes) {
         return false;
@@ -478,10 +485,7 @@ fn should_descend_into_workspace_entry(entry: &DirEntry, excluded_prefixes: &[Pa
         return false;
     }
 
-    !matches!(
-        name,
-        "target" | "build" | "node_modules" | "out" | "bin" | "obj" | "DerivedData"
-    )
+    !matches!(name, "target" | "build" | "node_modules" | "out" | "bin" | "obj" | "DerivedData")
 }
 
 fn build_workspace_scan_exclude_prefixes(
@@ -512,10 +516,11 @@ fn build_workspace_scan_exclude_prefixes(
     excluded_prefixes
 }
 
-fn is_path_excluded(path: &Path, excluded_prefixes: &[PathBuf]) -> bool {
-    excluded_prefixes
-        .iter()
-        .any(|excluded_prefix| path.starts_with(excluded_prefix))
+fn is_path_excluded(
+    path: &Path,
+    excluded_prefixes: &[PathBuf],
+) -> bool {
+    excluded_prefixes.iter().any(|excluded_prefix| path.starts_with(excluded_prefix))
 }
 
 /// Compute include paths for a file during project scanning.
@@ -540,11 +545,7 @@ pub(super) async fn compute_include_paths_for_uri_cached(
     compiler.ensure_system_includes_ready().await;
 
     let Some(file_path) = uri.to_file_path().ok() else {
-        return compiler
-            .get_system_include_paths()
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect();
+        return compiler.get_system_include_paths().iter().map(|p| p.display().to_string()).collect();
     };
     let cache_key = normalize_path(&file_path);
     if let Some(entry) = include_paths_cache.get(&cache_key)
@@ -571,9 +572,7 @@ pub(super) async fn compile_filtered_diagnostics_for_document(
     text: &str,
 ) -> Vec<Diagnostic> {
     let target_path = uri.to_file_path().ok().map(|p| normalize_path(&p));
-    let strict_file_match = target_path
-        .as_ref()
-        .is_some_and(|path| is_header_file(path));
+    let strict_file_match = target_path.as_ref().is_some_and(|path| is_header_file(path));
 
     let raw_diagnostics = if strict_file_match {
         if let Some(path) = target_path.as_deref() {
@@ -600,9 +599,7 @@ pub(super) async fn compile_filtered_diagnostics_for_document(
             workspace_generation,
         )
         .await;
-        compiler
-            .compile_with_include_paths(text, uri.as_str(), &include_paths)
-            .await
+        compiler.compile_with_include_paths(text, uri.as_str(), &include_paths).await
     };
 
     filter_target_diagnostics(raw_diagnostics, target_path.as_deref(), strict_file_match)
@@ -619,11 +616,7 @@ async fn compile_header_owner_diagnostics(
     header_path: &Path,
 ) -> Vec<MetalDiagnostic> {
     let normalized_header = normalize_path(header_path);
-    let mut owners = get_owner_candidates_for_header(
-        header_owners,
-        &normalized_header,
-        HEADER_OWNER_COMPILE_CAP,
-    );
+    let mut owners = get_owner_candidates_for_header(header_owners, &normalized_header, HEADER_OWNER_COMPILE_CAP);
     if owners.is_empty() {
         owners = discover_header_owners_on_demand(
             compiler,
@@ -635,10 +628,7 @@ async fn compile_header_owner_diagnostics(
         .await;
     }
     if owners.is_empty() {
-        debug!(
-            "No owner `.metal` files found for header {}; skipping standalone diagnostics",
-            header_uri
-        );
+        debug!("No owner `.metal` files found for header {}; skipping standalone diagnostics", header_uri);
         return Vec::new();
     }
 
@@ -658,9 +648,7 @@ async fn compile_header_owner_diagnostics(
             workspace_generation,
         )
         .await;
-        let mut owner_diags = compiler
-            .compile_with_include_paths(&source, owner_uri.as_str(), &include_paths)
-            .await;
+        let mut owner_diags = compiler.compile_with_include_paths(&source, owner_uri.as_str(), &include_paths).await;
         diagnostics.append(&mut owner_diags);
     }
     diagnostics
@@ -675,11 +663,7 @@ async fn discover_header_owners_on_demand(
 ) -> Vec<PathBuf> {
     let mut owners = Vec::new();
     for root in workspace_roots {
-        for entry in WalkDir::new(root)
-            .follow_links(true)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
+        for entry in WalkDir::new(root).follow_links(true).into_iter().filter_map(|e| e.ok()) {
             let path = entry.path();
             if !path.extension().is_some_and(|ext| ext == "metal") {
                 continue;
@@ -687,8 +671,7 @@ async fn discover_header_owners_on_demand(
             let Ok(source) = tokio::fs::read_to_string(path).await else {
                 continue;
             };
-            let include_paths =
-                compute_include_paths_for(&path.to_path_buf(), workspace_roots, compiler);
+            let include_paths = compute_include_paths_for(&path.to_path_buf(), workspace_roots, compiler);
             let headers = collect_included_headers(path, &source, &include_paths);
             update_owner_links(header_owners, owner_headers, path, headers.clone());
             if headers.contains(normalized_header) {
@@ -718,17 +701,13 @@ fn filter_target_diagnostics(
     for diag in diagnostics {
         if diag.severity == DiagnosticSeverity::INFORMATION {
             if last_primary_kept {
-                let note_location = diag
-                    .file
-                    .as_deref()
-                    .and_then(|f| Url::from_file_path(f).ok())
-                    .map(|uri| {
-                        let pos = Position::new(diag.line, diag.column);
-                        Location {
-                            uri,
-                            range: Range::new(pos, pos),
-                        }
-                    });
+                let note_location = diag.file.as_deref().and_then(|f| Url::from_file_path(f).ok()).map(|uri| {
+                    let pos = Position::new(diag.line, diag.column);
+                    Location {
+                        uri,
+                        range: Range::new(pos, pos),
+                    }
+                });
                 if let Some(location) = note_location {
                     let last = out.last_mut().expect("last_primary_kept implies non-empty");
                     let related = last.related_information.get_or_insert_with(Vec::new);
@@ -757,12 +736,7 @@ fn filter_target_diagnostics(
             last_primary_kept = false;
             continue;
         }
-        let key = (
-            diag.line,
-            diag.column,
-            format!("{:?}", diag.severity),
-            diag.message.clone(),
-        );
+        let key = (diag.line, diag.column, format!("{:?}", diag.severity), diag.message.clone());
         if !dedupe.insert(key) {
             last_primary_kept = false;
             continue;
@@ -783,7 +757,10 @@ fn should_suppress_primary_diagnostic(diag: &MetalDiagnostic) -> bool {
 /// For diagnostics we intentionally avoid the filename-only fallback used by
 /// definition resolution, since it can misattribute errors from `utils.h` in
 /// another directory to the currently opened `utils.h`.
-fn diagnostic_paths_match(a: &str, b: &str) -> bool {
+fn diagnostic_paths_match(
+    a: &str,
+    b: &str,
+) -> bool {
     if a == b {
         return true;
     }
@@ -814,23 +791,30 @@ fn normalize_absolute_path(path: &Path) -> Option<PathBuf> {
         match component {
             Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
             Component::RootDir => normalized.push(component.as_os_str()),
-            Component::CurDir => {}
+            Component::CurDir => {},
             Component::ParentDir => {
                 let _ = normalized.pop();
-            }
+            },
             Component::Normal(part) => normalized.push(part),
         }
     }
     Some(normalized)
 }
 
-fn next_diagnostic_generation(generations: &DashMap<Url, u64>, uri: &Url) -> u64 {
+fn next_diagnostic_generation(
+    generations: &DashMap<Url, u64>,
+    uri: &Url,
+) -> u64 {
     let mut generation = generations.entry(uri.clone()).or_insert(0);
     *generation += 1;
     *generation
 }
 
-fn is_latest_diagnostic_generation(generations: &DashMap<Url, u64>, uri: &Url, value: u64) -> bool {
+fn is_latest_diagnostic_generation(
+    generations: &DashMap<Url, u64>,
+    uri: &Url,
+    value: u64,
+) -> bool {
     generations.get(uri).is_some_and(|current| *current == value)
 }
 

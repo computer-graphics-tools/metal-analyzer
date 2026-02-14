@@ -1,15 +1,16 @@
-use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, Documentation, MarkupContent, MarkupKind, Position,
-};
+use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, Documentation, MarkupContent, MarkupKind, Position};
 
-use crate::metal::builtins::{self, BuiltinKind};
-use crate::syntax::SyntaxTree;
-
-use super::builtins::{
-    METAL_HEADERS, PREPROCESSOR_DIRECTIVES, TEXTURE_METHODS, builtin_to_completion_item,
-    detect_function_name, first_identifier,
+use crate::{
+    completion::{
+        builtins::{
+            METAL_HEADERS, PREPROCESSOR_DIRECTIVES, TEXTURE_METHODS, builtin_to_completion_item, detect_function_name,
+            first_identifier,
+        },
+        context::{CursorContext, detect_context},
+    },
+    metal::builtins::{self, BuiltinKind},
+    syntax::SyntaxTree,
 };
-use super::context::{CursorContext, detect_context};
 
 /// Provides intelligent completion items for Metal Shading Language.
 pub struct CompletionProvider {
@@ -41,7 +42,9 @@ impl CompletionProvider {
 
         match ctx {
             CursorContext::Attribute => self.attribute_completions(),
-            CursorContext::MemberAccess { ref receiver } => self.member_completions(receiver),
+            CursorContext::MemberAccess {
+                ref receiver,
+            } => self.member_completions(receiver),
             CursorContext::Preprocessor => self.preprocessor_completions(),
             CursorContext::Include => self.include_completions(),
             CursorContext::General => self.general_completions(text),
@@ -58,7 +61,10 @@ impl CompletionProvider {
             .collect()
     }
 
-    fn member_completions(&self, receiver: &str) -> Vec<CompletionItem> {
+    fn member_completions(
+        &self,
+        receiver: &str,
+    ) -> Vec<CompletionItem> {
         let mut items = Vec::new();
 
         let is_vector = Self::looks_like_vector_type(receiver);
@@ -145,7 +151,10 @@ impl CompletionProvider {
             .collect()
     }
 
-    fn general_completions(&self, text: &str) -> Vec<CompletionItem> {
+    fn general_completions(
+        &self,
+        text: &str,
+    ) -> Vec<CompletionItem> {
         let mut items: Vec<CompletionItem> = builtins::all()
             .iter()
             .map(|e| {
@@ -168,7 +177,10 @@ impl CompletionProvider {
 
     /// Lightweight scan of the current document to offer completions for
     /// user-defined symbols (functions, structs, variables, macros).
-    fn document_symbol_completions(&self, text: &str) -> Vec<CompletionItem> {
+    fn document_symbol_completions(
+        &self,
+        text: &str,
+    ) -> Vec<CompletionItem> {
         let mut items = Vec::new();
         let mut seen = std::collections::HashSet::new();
 

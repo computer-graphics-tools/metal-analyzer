@@ -1,23 +1,22 @@
 mod common;
 
-use std::path::PathBuf;
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
 use common::{fixture_path, has_metal_compiler, position_of, read_fixture};
 use futures::{SinkExt, StreamExt};
-use serde_json::json;
-use tower::Service;
-use tower::ServiceExt;
-use tower_lsp::jsonrpc::{Request, Response};
-use tower_lsp::lsp_types::{
-    DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, InitializedParams,
-    PartialResultParams, TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
-    WorkDoneProgressParams,
-};
-use tower_lsp::{ClientSocket, LspService};
-use walkdir::WalkDir;
-
 use metal_analyzer::MetalLanguageServer;
+use serde_json::json;
+use tower::{Service, ServiceExt};
+use tower_lsp::{
+    ClientSocket, LspService,
+    jsonrpc::{Request, Response},
+    lsp_types::{
+        DidOpenTextDocumentParams, GotoDefinitionParams, GotoDefinitionResponse, InitializedParams,
+        PartialResultParams, TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
+        WorkDoneProgressParams,
+    },
+};
+use walkdir::WalkDir;
 
 async fn initialize_service() -> (LspService<MetalLanguageServer>, ClientSocket) {
     let (mut service, socket) = LspService::new(|client| MetalLanguageServer::new(client, false));
@@ -32,7 +31,7 @@ async fn initialize_service() -> (LspService<MetalLanguageServer>, ClientSocket)
                         "onSave": false
                     },
                     "indexing": {
-                        "enabled": false
+                        "enable": false
                     },
                     "logging": {
                         "level": "error"
@@ -42,29 +41,15 @@ async fn initialize_service() -> (LspService<MetalLanguageServer>, ClientSocket)
         }))
         .id(1)
         .finish();
-    let init_response = service
-        .ready()
-        .await
-        .expect("service ready")
-        .call(initialize)
-        .await
-        .expect("initialize call");
+    let init_response = service.ready().await.expect("service ready").call(initialize).await.expect("initialize call");
     assert!(init_response.is_some(), "initialize should return a response");
 
     let initialized = Request::build("initialized")
         .params(serde_json::to_value(InitializedParams {}).expect("serialize initialized params"))
         .finish();
-    let initialized_response = service
-        .ready()
-        .await
-        .expect("service ready")
-        .call(initialized)
-        .await
-        .expect("initialized call");
-    assert!(
-        initialized_response.is_none(),
-        "initialized notification should not return a response"
-    );
+    let initialized_response =
+        service.ready().await.expect("service ready").call(initialized).await.expect("initialized call");
+    assert!(initialized_response.is_none(), "initialized notification should not return a response");
 
     (service, socket)
 }
@@ -76,17 +61,10 @@ async fn send_notification<P: serde::Serialize>(
     method: &'static str,
     params: P,
 ) {
-    let request = Request::build(method)
-        .params(serde_json::to_value(params).expect("serialize notification params"))
-        .finish();
+    let request =
+        Request::build(method).params(serde_json::to_value(params).expect("serialize notification params")).finish();
     let mut call_fut = Box::pin(async {
-        service
-            .ready()
-            .await
-            .expect("service ready")
-            .call(request)
-            .await
-            .expect("notification call")
+        service.ready().await.expect("service ready").call(request).await.expect("notification call")
     });
 
     loop {
@@ -119,19 +97,10 @@ async fn send_request_with_client_pump<P: serde::Serialize>(
     params: P,
     id: i64,
 ) -> (Response, Vec<String>) {
-    let request = Request::build(method)
-        .params(serde_json::to_value(params).expect("serialize request params"))
-        .id(id)
-        .finish();
-    let mut call_fut = Box::pin(async {
-        service
-            .ready()
-            .await
-            .expect("service ready")
-            .call(request)
-            .await
-            .expect("request call")
-    });
+    let request =
+        Request::build(method).params(serde_json::to_value(params).expect("serialize request params")).id(id).finish();
+    let mut call_fut =
+        Box::pin(async { service.ready().await.expect("service ready").call(request).await.expect("request call") });
     let mut server_requests = Vec::new();
 
     loop {
@@ -169,7 +138,7 @@ fn first_location(resp: GotoDefinitionResponse) -> tower_lsp::lsp_types::Locatio
                 uri: link.target_uri,
                 range: link.target_selection_range,
             }
-        }
+        },
     }
 }
 
@@ -184,10 +153,8 @@ fn external_attention_fixture_paths() -> Option<(PathBuf, PathBuf)> {
         .filter_map(Result::ok)
         .map(|entry| entry.into_path())
         .find(|path| {
-            let is_metal_file = path
-                .extension()
-                .and_then(|extension| extension.to_str())
-                .is_some_and(|extension| extension == "metal");
+            let is_metal_file =
+                path.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| extension == "metal");
             let parent_is_attention_dir = path
                 .parent()
                 .and_then(|parent| parent.file_name())
@@ -236,7 +203,9 @@ async fn goto_definition_emits_navigation_progress_notifications() {
 
     let params = GotoDefinitionParams {
         text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            text_document: TextDocumentIdentifier {
+                uri: uri.clone(),
+            },
             position,
         },
         work_done_progress_params: WorkDoneProgressParams {
@@ -256,11 +225,7 @@ async fn goto_definition_emits_navigation_progress_notifications() {
         2,
     )
     .await;
-    assert!(
-        response.is_ok(),
-        "goto-definition should return successful response, got error: {:?}",
-        response.error()
-    );
+    assert!(response.is_ok(), "goto-definition should return successful response, got error: {:?}", response.error());
 
     let result = response.result().cloned().expect("response result");
     let definition = serde_json::from_value::<Option<GotoDefinitionResponse>>(result)
@@ -268,21 +233,14 @@ async fn goto_definition_emits_navigation_progress_notifications() {
         .expect("definition result should be available");
     let target = first_location(definition);
     assert_eq!(target.uri.path(), uri.path(), "definition should stay in same file");
-    assert_eq!(
-        target.range.start.line, 16,
-        "local_template definition line should match fixture"
-    );
+    assert_eq!(target.range.start.line, 16, "local_template definition line should match fixture");
 
     assert!(
-        server_requests
-            .iter()
-            .any(|method| method == "window/workDoneProgress/create"),
+        server_requests.iter().any(|method| method == "window/workDoneProgress/create"),
         "navigation should trigger workDoneProgress/create roundtrip"
     );
     assert!(
-        pending_notifications
-            .iter()
-            .any(|notification| notification.method() == "$/progress"),
+        pending_notifications.iter().any(|notification| notification.method() == "$/progress"),
         "navigation should emit $/progress notifications"
     );
 }
@@ -324,7 +282,9 @@ async fn goto_definition_resolves_external_attention_fixture_types_and_fields() 
     // 1) `AttnParams` in kernel signature should resolve to generated/attention.h.
     let type_params = GotoDefinitionParams {
         text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            text_document: TextDocumentIdentifier {
+                uri: uri.clone(),
+            },
             position: position_for("AttnParams* params [[buffer(4)]]"),
         },
         work_done_progress_params: WorkDoneProgressParams {
@@ -344,11 +304,7 @@ async fn goto_definition_resolves_external_attention_fixture_types_and_fields() 
         2,
     )
     .await;
-    assert!(
-        type_response.is_ok(),
-        "AttnParams goto-definition should succeed, got error: {:?}",
-        type_response.error()
-    );
+    assert!(type_response.is_ok(), "AttnParams goto-definition should succeed, got error: {:?}", type_response.error());
     let type_result = type_response.result().cloned().expect("type result");
     let type_definition = serde_json::from_value::<Option<GotoDefinitionResponse>>(type_result)
         .expect("deserialize type goto-definition payload")
@@ -363,7 +319,9 @@ async fn goto_definition_resolves_external_attention_fixture_types_and_fields() 
     // 2) `AttnMaskParams` in kernel signature should resolve to generated/attention.h.
     let mask_type_params = GotoDefinitionParams {
         text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            text_document: TextDocumentIdentifier {
+                uri: uri.clone(),
+            },
             position: position_for("AttnMaskParams* mask_params"),
         },
         work_done_progress_params: WorkDoneProgressParams {
@@ -388,14 +346,10 @@ async fn goto_definition_resolves_external_attention_fixture_types_and_fields() 
         "AttnMaskParams goto-definition should succeed, got error: {:?}",
         mask_type_response.error()
     );
-    let mask_type_result = mask_type_response
-        .result()
-        .cloned()
-        .expect("mask type result");
-    let mask_type_definition =
-        serde_json::from_value::<Option<GotoDefinitionResponse>>(mask_type_result)
-            .expect("deserialize mask type goto-definition payload")
-            .expect("AttnMaskParams definition should be available");
+    let mask_type_result = mask_type_response.result().cloned().expect("mask type result");
+    let mask_type_definition = serde_json::from_value::<Option<GotoDefinitionResponse>>(mask_type_result)
+        .expect("deserialize mask type goto-definition payload")
+        .expect("AttnMaskParams definition should be available");
     let mask_type_target = first_location(mask_type_definition);
     assert!(
         mask_type_target.uri.path().ends_with("generated/attention.h"),
@@ -406,7 +360,9 @@ async fn goto_definition_resolves_external_attention_fixture_types_and_fields() 
     // 3) `v_strides` field access should resolve to field declaration in header.
     let field_params = GotoDefinitionParams {
         text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            text_document: TextDocumentIdentifier {
+                uri: uri.clone(),
+            },
             position: {
                 let mut pos = position_for("params->v_strides[1]");
                 pos.character += "params->".chars().count() as u32;
@@ -449,7 +405,9 @@ async fn goto_definition_resolves_external_attention_fixture_types_and_fields() 
     // 4) `o_strides` field access should resolve to field declaration in header.
     let out_field_params = GotoDefinitionParams {
         text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            text_document: TextDocumentIdentifier {
+                uri: uri.clone(),
+            },
             position: {
                 let mut pos = position_for("params->o_strides[2]");
                 pos.character += "params->".chars().count() as u32;
@@ -478,10 +436,7 @@ async fn goto_definition_resolves_external_attention_fixture_types_and_fields() 
         "o_strides goto-definition should succeed, got error: {:?}",
         out_field_response.error()
     );
-    let out_field_result = out_field_response
-        .result()
-        .cloned()
-        .expect("o_strides result");
+    let out_field_result = out_field_response.result().cloned().expect("o_strides result");
     let out_field_definition = serde_json::from_value::<Option<GotoDefinitionResponse>>(out_field_result)
         .expect("deserialize o_strides goto-definition payload")
         .expect("o_strides definition should be available");

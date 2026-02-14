@@ -1,5 +1,6 @@
-use crate::syntax::kind::SyntaxKind;
 use rowan::Language;
+
+use crate::syntax::kind::SyntaxKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum MetalLanguage {}

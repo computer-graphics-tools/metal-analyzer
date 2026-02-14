@@ -2,24 +2,35 @@
 use rowan::{TextRange, TextSize, TokenAtOffset};
 use tower_lsp::lsp_types::{Position, Range};
 
-use crate::syntax::cst::{SyntaxNode, SyntaxToken};
-use crate::syntax::kind::SyntaxKind;
+use crate::syntax::{
+    cst::{SyntaxNode, SyntaxToken},
+    kind::SyntaxKind,
+};
 
-pub fn range_to_lsp(range: TextRange, source: &str) -> Range {
+pub fn range_to_lsp(
+    range: TextRange,
+    source: &str,
+) -> Range {
     Range {
         start: offset_to_position(source, range.start()),
         end: offset_to_position(source, range.end()),
     }
 }
 
-pub fn token_text<'a>(token: &SyntaxToken, source: &'a str) -> &'a str {
+pub fn token_text<'a>(
+    token: &SyntaxToken,
+    source: &'a str,
+) -> &'a str {
     let range = token.text_range();
     let start = range.start().into();
     let end = range.end().into();
     &source[start..end]
 }
 
-pub fn node_text<'a>(node: &SyntaxNode, source: &'a str) -> &'a str {
+pub fn node_text<'a>(
+    node: &SyntaxNode,
+    source: &'a str,
+) -> &'a str {
     let range = node.text_range();
     let start = range.start().into();
     let end = range.end().into();
@@ -27,14 +38,21 @@ pub fn node_text<'a>(node: &SyntaxNode, source: &'a str) -> &'a str {
 }
 
 /// Find the deepest node at the given LSP position.
-pub fn node_at_position(root: &SyntaxNode, source: &str, position: Position) -> Option<SyntaxNode> {
+pub fn node_at_position(
+    root: &SyntaxNode,
+    source: &str,
+    position: Position,
+) -> Option<SyntaxNode> {
     let offset = position_to_offset(source, position);
     let token = pick_token(root.token_at_offset(offset))?;
     token.parent()
 }
 
 /// Walk ancestors until a node with the given kind is found.
-pub fn find_ancestor(node: SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
+pub fn find_ancestor(
+    node: SyntaxNode,
+    kind: SyntaxKind,
+) -> Option<SyntaxNode> {
     let mut current = node;
     loop {
         if current.kind() == kind {
@@ -45,7 +63,11 @@ pub fn find_ancestor(node: SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNode> {
 }
 
 /// Extract the identifier word at a position using the syntax tree.
-pub fn word_at_position(root: &SyntaxNode, source: &str, position: Position) -> Option<String> {
+pub fn word_at_position(
+    root: &SyntaxNode,
+    source: &str,
+    position: Position,
+) -> Option<String> {
     let offset = position_to_offset(source, position);
     let token = pick_token(root.token_at_offset(offset))?;
     if token.kind() == SyntaxKind::Ident {
@@ -95,7 +117,10 @@ fn allows_navigation_text_fallback(kind: SyntaxKind) -> bool {
 }
 
 /// Extract the identifier word at a position using plain text scanning.
-pub fn word_at_position_text_fallback(source: &str, position: Position) -> Option<String> {
+pub fn word_at_position_text_fallback(
+    source: &str,
+    position: Position,
+) -> Option<String> {
     let line = source.lines().nth(position.line as usize)?;
     let chars: Vec<char> = line.chars().collect();
     let col = position.character as usize;
@@ -149,7 +174,11 @@ pub fn include_at_position_text_fallback(
 
     let start_index = line.find('<').or_else(|| line.find('"'))?;
     let is_system = line.as_bytes()[start_index] == b'<';
-    let end_char = if is_system { '>' } else { '"' };
+    let end_char = if is_system {
+        '>'
+    } else {
+        '"'
+    };
     let end_index = line[start_index + 1..].find(end_char)? + start_index + 1;
 
     let col = position.character as usize;
@@ -174,7 +203,10 @@ pub fn attribute_at_position(
     attribute_at_position_text_fallback(source, position)
 }
 
-pub fn attribute_at_position_text_fallback(source: &str, position: Position) -> Option<String> {
+pub fn attribute_at_position_text_fallback(
+    source: &str,
+    position: Position,
+) -> Option<String> {
     let line = source.lines().nth(position.line as usize)?;
     let start = line.find("[[")?;
     let end = line[start + 2..].find("]]")? + start + 2;
@@ -207,7 +239,10 @@ fn pick_token(tokens: TokenAtOffset<SyntaxToken>) -> Option<SyntaxToken> {
     })
 }
 
-fn position_to_offset(source: &str, position: Position) -> TextSize {
+fn position_to_offset(
+    source: &str,
+    position: Position,
+) -> TextSize {
     let mut byte_offset = 0usize;
     let mut lines = source.split('\n');
 
@@ -235,7 +270,10 @@ fn position_to_offset(source: &str, position: Position) -> TextSize {
     TextSize::from((byte_offset as u32).min(source.len() as u32))
 }
 
-fn offset_to_position(source: &str, offset: TextSize) -> Position {
+fn offset_to_position(
+    source: &str,
+    offset: TextSize,
+) -> Position {
     let mut remaining = offset.into();
     for (line_index, line) in source.split('\n').enumerate() {
         let line_len = line.len();

@@ -1,15 +1,22 @@
 //! Definition provider and AST index utilities.
 
-mod ast_index;
-mod clang_nodes;
-mod compiler;
-mod indexer;
-mod index_cache;
-mod project_index;
-mod provider;
-mod ref_site;
-mod symbol_def;
-mod utils;
+pub(crate) mod ast_index;
+pub(crate) mod clang_nodes;
+pub(crate) mod compiler;
+pub(crate) mod fallback_lookup;
+pub(crate) mod index_cache;
+pub(crate) mod indexer;
+pub(crate) mod perf;
+pub(crate) mod precise_lookup;
+pub(crate) mod project_graph;
+pub(crate) mod project_index;
+pub(crate) mod provider;
+pub(crate) mod ref_site;
+pub(crate) mod symbol_def;
+pub(crate) mod symbol_rank;
+pub(crate) mod symbol_text;
+pub(crate) mod system_lookup;
+pub(crate) mod utils;
 
 pub use ast_index::AstIndex;
 pub use project_index::ProjectIndex;

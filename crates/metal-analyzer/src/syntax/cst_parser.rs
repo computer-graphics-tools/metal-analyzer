@@ -1,6 +1,6 @@
-use crate::syntax::kind::SyntaxKind;
-use crate::syntax::lexer::Lexer;
 use rowan::{GreenNode, GreenNodeBuilder};
+
+use crate::syntax::{kind::SyntaxKind, lexer::Lexer};
 
 pub struct Parser<'a> {
     tokens: Vec<(SyntaxKind, &'a str)>,
@@ -27,7 +27,10 @@ impl<'a> Parser<'a> {
         self.builder.finish()
     }
 
-    fn start_node(&mut self, kind: SyntaxKind) {
+    fn start_node(
+        &mut self,
+        kind: SyntaxKind,
+    ) {
         self.builder.start_node(kind.into());
     }
 
@@ -53,34 +56,34 @@ impl<'a> Parser<'a> {
                 | SyntaxKind::KwMesh
                 | SyntaxKind::KwObject => {
                     self.parse_function_def();
-                }
+                },
                 SyntaxKind::KwStruct => {
                     self.parse_struct_def();
-                }
+                },
                 SyntaxKind::KwClass => {
                     self.parse_class_def();
-                }
+                },
                 SyntaxKind::KwEnum => {
                     self.parse_enum_def();
-                }
+                },
                 SyntaxKind::KwNamespace => {
                     self.parse_namespace_def();
-                }
+                },
                 SyntaxKind::KwTemplate => {
                     self.parse_template_def();
-                }
+                },
                 SyntaxKind::KwTypedef => {
                     self.parse_typedef_def();
-                }
+                },
                 SyntaxKind::KwUsing => {
                     self.parse_using_def();
-                }
+                },
                 _ => {
                     if !self.parse_function_or_variable_def() {
                         // Consume unexpected token to make progress
                         self.bump();
                     }
-                }
+                },
             }
         }
     }
@@ -101,7 +104,7 @@ impl<'a> Parser<'a> {
                     "pragma" => SyntaxKind::PreprocPragma,
                     _ => SyntaxKind::PreprocDefine,
                 }
-            }
+            },
             _ => SyntaxKind::PreprocDefine,
         };
 
@@ -306,10 +309,7 @@ impl<'a> Parser<'a> {
                 if self.at(SyntaxKind::Equal) {
                     self.bump();
                     // consume until comma or greater
-                    while !self.at(SyntaxKind::Comma)
-                        && !self.at(SyntaxKind::Greater)
-                        && !self.is_eof()
-                    {
+                    while !self.at(SyntaxKind::Comma) && !self.at(SyntaxKind::Greater) && !self.is_eof() {
                         if self.at(SyntaxKind::Less) {
                             self.consume_balanced(SyntaxKind::Less, SyntaxKind::Greater);
                         } else if self.at(SyntaxKind::LParen) {
@@ -508,7 +508,7 @@ impl<'a> Parser<'a> {
                     self.bump();
                 }
                 self.finish_node();
-            }
+            },
             SyntaxKind::KwIf => {
                 self.start_node(SyntaxKind::IfStmt);
                 self.bump();
@@ -525,7 +525,7 @@ impl<'a> Parser<'a> {
                     self.parse_statement();
                 }
                 self.finish_node();
-            }
+            },
             SyntaxKind::KwFor => {
                 self.start_node(SyntaxKind::ForStmt);
                 self.bump();
@@ -555,7 +555,7 @@ impl<'a> Parser<'a> {
                 self.skip_trivia();
                 self.parse_statement();
                 self.finish_node();
-            }
+            },
             SyntaxKind::KwWhile => {
                 self.start_node(SyntaxKind::WhileStmt);
                 self.bump();
@@ -566,7 +566,7 @@ impl<'a> Parser<'a> {
                 self.skip_trivia();
                 self.parse_statement();
                 self.finish_node();
-            }
+            },
             SyntaxKind::KwSwitch => {
                 self.start_node(SyntaxKind::SwitchStmt);
                 self.bump();
@@ -577,7 +577,7 @@ impl<'a> Parser<'a> {
                 self.skip_trivia();
                 self.parse_statement();
                 self.finish_node();
-            }
+            },
             SyntaxKind::KwCase => {
                 self.start_node(SyntaxKind::CaseStmt);
                 self.bump();
@@ -589,7 +589,7 @@ impl<'a> Parser<'a> {
                     self.bump();
                 }
                 self.finish_node();
-            }
+            },
             SyntaxKind::KwBreak => {
                 self.start_node(SyntaxKind::BreakStmt);
                 self.bump();
@@ -597,7 +597,7 @@ impl<'a> Parser<'a> {
                     self.bump();
                 }
                 self.finish_node();
-            }
+            },
             SyntaxKind::KwContinue => {
                 self.start_node(SyntaxKind::ContinueStmt);
                 self.bump();
@@ -605,7 +605,7 @@ impl<'a> Parser<'a> {
                     self.bump();
                 }
                 self.finish_node();
-            }
+            },
             _ => {
                 self.start_node(SyntaxKind::ExprStmt);
                 if !self.parse_declaration_or_expression_until(SyntaxKind::Semicolon) {
@@ -615,11 +615,14 @@ impl<'a> Parser<'a> {
                     self.bump();
                 }
                 self.finish_node();
-            }
+            },
         }
     }
 
-    fn parse_declaration_or_expression_until(&mut self, end: SyntaxKind) -> bool {
+    fn parse_declaration_or_expression_until(
+        &mut self,
+        end: SyntaxKind,
+    ) -> bool {
         if !self.looks_like_declaration() {
             return false;
         }
@@ -654,14 +657,11 @@ impl<'a> Parser<'a> {
                     };
 
                     match next {
-                        SyntaxKind::DoubleColon
-                        | SyntaxKind::Less
-                        | SyntaxKind::Star
-                        | SyntaxKind::Amp => {
+                        SyntaxKind::DoubleColon | SyntaxKind::Less | SyntaxKind::Star | SyntaxKind::Amp => {
                             // Qualified name / template / pointer / reference.
                             seen_core = true;
                             self.bump();
-                        }
+                        },
                         SyntaxKind::Ident => {
                             // Ident Ident ... is usually "Type Name", but we also
                             // see "Mod Type Name" in some codebases (macros).
@@ -673,17 +673,17 @@ impl<'a> Parser<'a> {
                                 self.bump();
                                 break;
                             }
-                        }
+                        },
                         SyntaxKind::KwConst | SyntaxKind::KwVolatile => {
                             // Post-type qualifiers: `MyType const x`.
                             seen_core = true;
                             self.bump();
-                        }
+                        },
                         other if self.is_type_keyword(other) => {
                             // Likely a macro/modifier before a real type keyword,
                             // e.g. `METAL_FUNC void f(...)`.
                             self.bump();
-                        }
+                        },
                         _ => {
                             // If we've already seen the core type (e.g. `void`),
                             // this identifier is almost certainly the declarator
@@ -695,9 +695,9 @@ impl<'a> Parser<'a> {
                             // Otherwise, treat it as the core type name.
                             self.bump();
                             break;
-                        }
+                        },
                     }
-                }
+                },
                 SyntaxKind::KwVoid
                 | SyntaxKind::KwBool
                 | SyntaxKind::KwChar
@@ -718,7 +718,7 @@ impl<'a> Parser<'a> {
                 | SyntaxKind::KwBFloat16 => {
                     seen_core = true;
                     self.bump();
-                }
+                },
                 SyntaxKind::KwConst
                 | SyntaxKind::KwVolatile
                 | SyntaxKind::KwStatic
@@ -731,7 +731,7 @@ impl<'a> Parser<'a> {
                 | SyntaxKind::KwConstant
                 | SyntaxKind::DoubleColon => {
                     self.bump();
-                }
+                },
                 SyntaxKind::Whitespace | SyntaxKind::Comment => {
                     // Stop before trailing trivia that separates the type from the declarator name,
                     // e.g. `void main` or `float a`.
@@ -739,24 +739,19 @@ impl<'a> Parser<'a> {
                         let after_ident = self.peek_nth_non_trivia(1);
                         if !matches!(
                             after_ident,
-                            Some(
-                                SyntaxKind::DoubleColon
-                                    | SyntaxKind::Less
-                                    | SyntaxKind::Star
-                                    | SyntaxKind::Amp
-                            )
+                            Some(SyntaxKind::DoubleColon | SyntaxKind::Less | SyntaxKind::Star | SyntaxKind::Amp)
                         ) {
                             break;
                         }
                     }
                     self.bump();
-                }
+                },
                 SyntaxKind::Less => {
                     self.consume_balanced(SyntaxKind::Less, SyntaxKind::Greater);
-                }
+                },
                 SyntaxKind::Star | SyntaxKind::Amp => {
                     self.bump();
-                }
+                },
                 _ => break,
             }
         }
@@ -768,13 +763,20 @@ impl<'a> Parser<'a> {
         self.parse_binary_expression(0);
     }
 
-    fn parse_binary_expression(&mut self, min_prec: u8) {
+    fn parse_binary_expression(
+        &mut self,
+        min_prec: u8,
+    ) {
         self.parse_unary_expression();
         while let Some((prec, right_assoc)) = self.binary_precedence(self.peek()) {
             if prec < min_prec {
                 break;
             }
-            let next_min = if right_assoc { prec } else { prec + 1 };
+            let next_min = if right_assoc {
+                prec
+            } else {
+                prec + 1
+            };
             self.start_node(SyntaxKind::BinaryExpr);
             self.bump();
             self.parse_binary_expression(next_min);
@@ -801,12 +803,12 @@ impl<'a> Parser<'a> {
                     self.start_node(SyntaxKind::CallExpr);
                     self.consume_balanced(SyntaxKind::LParen, SyntaxKind::RParen);
                     self.finish_node();
-                }
+                },
                 SyntaxKind::LBracket => {
                     self.start_node(SyntaxKind::IndexExpr);
                     self.consume_balanced(SyntaxKind::LBracket, SyntaxKind::RBracket);
                     self.finish_node();
-                }
+                },
                 SyntaxKind::Dot | SyntaxKind::Arrow => {
                     self.start_node(SyntaxKind::MemberExpr);
                     self.bump();
@@ -814,12 +816,12 @@ impl<'a> Parser<'a> {
                         self.bump();
                     }
                     self.finish_node();
-                }
+                },
                 SyntaxKind::PlusPlus | SyntaxKind::MinusMinus => {
                     self.start_node(SyntaxKind::PostfixExpr);
                     self.bump();
                     self.finish_node();
-                }
+                },
                 _ => break,
             }
         }
@@ -838,20 +840,20 @@ impl<'a> Parser<'a> {
                 self.start_node(SyntaxKind::LiteralExpr);
                 self.bump();
                 self.finish_node();
-            }
+            },
             SyntaxKind::Ident => {
                 self.start_node(SyntaxKind::LiteralExpr);
                 self.bump();
                 self.finish_node();
-            }
+            },
             SyntaxKind::LParen => {
                 self.start_node(SyntaxKind::CastExpr);
                 self.consume_balanced(SyntaxKind::LParen, SyntaxKind::RParen);
                 self.finish_node();
-            }
+            },
             _ => {
                 self.bump();
-            }
+            },
         }
     }
 
@@ -860,7 +862,7 @@ impl<'a> Parser<'a> {
             match self.peek() {
                 SyntaxKind::Whitespace | SyntaxKind::Comment => {
                     self.bump();
-                }
+                },
                 _ => break,
             }
         }
@@ -873,7 +875,10 @@ impl<'a> Parser<'a> {
         self.tokens[self.pos].0
     }
 
-    fn at(&self, kind: SyntaxKind) -> bool {
+    fn at(
+        &self,
+        kind: SyntaxKind,
+    ) -> bool {
         self.peek() == kind
     }
 
@@ -929,7 +934,10 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn binary_precedence(&self, kind: SyntaxKind) -> Option<(u8, bool)> {
+    fn binary_precedence(
+        &self,
+        kind: SyntaxKind,
+    ) -> Option<(u8, bool)> {
         match kind {
             SyntaxKind::Equal
             | SyntaxKind::PlusEqual
@@ -948,10 +956,9 @@ impl<'a> Parser<'a> {
             SyntaxKind::Caret => Some((5, false)),
             SyntaxKind::Amp => Some((6, false)),
             SyntaxKind::EqualEqual | SyntaxKind::NotEqual => Some((7, false)),
-            SyntaxKind::Less
-            | SyntaxKind::Greater
-            | SyntaxKind::LessEqual
-            | SyntaxKind::GreaterEqual => Some((8, false)),
+            SyntaxKind::Less | SyntaxKind::Greater | SyntaxKind::LessEqual | SyntaxKind::GreaterEqual => {
+                Some((8, false))
+            },
             SyntaxKind::LeftShift | SyntaxKind::RightShift => Some((9, false)),
             SyntaxKind::Plus | SyntaxKind::Minus => Some((10, false)),
             SyntaxKind::Star | SyntaxKind::Slash | SyntaxKind::Percent => Some((11, false)),
@@ -959,7 +966,10 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn is_unary_operator(&self, kind: SyntaxKind) -> bool {
+    fn is_unary_operator(
+        &self,
+        kind: SyntaxKind,
+    ) -> bool {
         matches!(
             kind,
             SyntaxKind::Plus
@@ -977,7 +987,11 @@ impl<'a> Parser<'a> {
         )
     }
 
-    fn consume_balanced(&mut self, open: SyntaxKind, close: SyntaxKind) {
+    fn consume_balanced(
+        &mut self,
+        open: SyntaxKind,
+        close: SyntaxKind,
+    ) {
         if !self.at(open) {
             return;
         }
@@ -1007,7 +1021,10 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn peek_nth_non_trivia(&self, nth: usize) -> Option<SyntaxKind> {
+    fn peek_nth_non_trivia(
+        &self,
+        nth: usize,
+    ) -> Option<SyntaxKind> {
         let mut count = 0usize;
         let mut idx = self.pos;
         while idx < self.tokens.len() {
@@ -1023,7 +1040,10 @@ impl<'a> Parser<'a> {
         None
     }
 
-    fn peek_text_nth_non_trivia(&self, nth: usize) -> Option<&'a str> {
+    fn peek_text_nth_non_trivia(
+        &self,
+        nth: usize,
+    ) -> Option<&'a str> {
         let mut count = 0usize;
         let mut idx = self.pos;
         while idx < self.tokens.len() {
@@ -1108,12 +1128,8 @@ impl<'a> Parser<'a> {
             return false;
         };
 
-        let name_idx = (0..lparen_idx).rev().find(|i| {
-            !matches!(
-                self.tokens[*i].0,
-                SyntaxKind::Whitespace | SyntaxKind::Comment
-            )
-        });
+        let name_idx =
+            (0..lparen_idx).rev().find(|i| !matches!(self.tokens[*i].0, SyntaxKind::Whitespace | SyntaxKind::Comment));
 
         let Some(name_idx) = name_idx else {
             return false;
@@ -1128,7 +1144,10 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn is_type_keyword(&self, kind: SyntaxKind) -> bool {
+    fn is_type_keyword(
+        &self,
+        kind: SyntaxKind,
+    ) -> bool {
         matches!(
             kind,
             SyntaxKind::KwVoid

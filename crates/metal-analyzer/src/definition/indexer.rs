@@ -2,14 +2,21 @@ use std::collections::HashMap;
 
 use tracing::debug;
 
-use super::ast_index::AstIndex;
-use super::clang_nodes::{Clang, DeclData, Node, RefExprData, resolve_loc};
-use super::ref_site::{RefSite, RefSiteLocation};
-use super::symbol_def::SymbolDef;
-use super::utils::normalize_type_name;
+use crate::definition::{
+    ast_index::AstIndex,
+    clang_nodes::{Clang, DeclData, Node, RefExprData, resolve_loc},
+    ref_site::{RefSite, RefSiteLocation},
+    symbol_def::SymbolDef,
+    utils::normalize_type_name,
+};
 
 /// Collect a declaration node into the definitions list.
-fn collect_decl(node: &Node, data: &DeclData, kind: &str, defs: &mut Vec<SymbolDef>) {
+fn collect_decl(
+    node: &Node,
+    data: &DeclData,
+    kind: &str,
+    defs: &mut Vec<SymbolDef>,
+) {
     let name = match data.name() {
         Some(n) if !n.is_empty() => n,
         _ => return,
@@ -52,7 +59,11 @@ fn collect_decl(node: &Node, data: &DeclData, kind: &str, defs: &mut Vec<SymbolD
 }
 
 /// Collect a reference expression (DeclRefExpr, MemberExpr).
-fn collect_ref(_node: &Node, data: &RefExprData, refs: &mut Vec<RefSite>) {
+fn collect_ref(
+    _node: &Node,
+    data: &RefExprData,
+    refs: &mut Vec<RefSite>,
+) {
     if data.is_implicit.unwrap_or(false) {
         return;
     }
@@ -63,11 +74,7 @@ fn collect_ref(_node: &Node, data: &RefExprData, refs: &mut Vec<RefSite>) {
     };
 
     // Prefer range.begin for precise token location, fall back to loc.
-    let source_loc = data
-        .range
-        .as_ref()
-        .map(|r| &r.begin)
-        .or(data.loc.as_ref());
+    let source_loc = data.range.as_ref().map(|r| &r.begin).or(data.loc.as_ref());
     let source_loc = match source_loc {
         Some(loc) => loc,
         None => return,
@@ -107,7 +114,11 @@ fn collect_ref(_node: &Node, data: &RefExprData, refs: &mut Vec<RefSite>) {
 }
 
 /// Recursively walk the typed AST, collecting declarations and references.
-fn walk(node: &Node, defs: &mut Vec<SymbolDef>, refs: &mut Vec<RefSite>) {
+fn walk(
+    node: &Node,
+    defs: &mut Vec<SymbolDef>,
+    refs: &mut Vec<RefSite>,
+) {
     match &node.kind {
         Clang::FunctionDecl(d) => collect_decl(node, d, "FunctionDecl", defs),
         Clang::CXXRecordDecl(d) => collect_decl(node, d, "CXXRecordDecl", defs),
@@ -121,12 +132,12 @@ fn walk(node: &Node, defs: &mut Vec<SymbolDef>, refs: &mut Vec<RefSite>) {
         Clang::ClassTemplateDecl(d) => collect_decl(node, d, "ClassTemplateDecl", defs),
         Clang::ClassTemplateSpecializationDecl(d) => {
             collect_decl(node, d, "ClassTemplateSpecializationDecl", defs);
-        }
+        },
         Clang::UsingDecl(d) => collect_decl(node, d, "UsingDecl", defs),
         Clang::TemplateTypeParmDecl(d) => collect_decl(node, d, "TemplateTypeParmDecl", defs),
         Clang::NonTypeTemplateParmDecl(d) => {
             collect_decl(node, d, "NonTypeTemplateParmDecl", defs);
-        }
+        },
         Clang::VarDecl(d) => collect_decl(node, d, "VarDecl", defs),
         Clang::FieldDecl(d) => collect_decl(node, d, "FieldDecl", defs),
         Clang::ParmVarDecl(d) => collect_decl(node, d, "ParmVarDecl", defs),
@@ -134,7 +145,9 @@ fn walk(node: &Node, defs: &mut Vec<SymbolDef>, refs: &mut Vec<RefSite>) {
         Clang::DeclRefExpr(d) => collect_ref(node, d, refs),
         Clang::MemberExpr(d) => collect_ref(node, d, refs),
 
-        Clang::Other { .. } => {}
+        Clang::Other {
+            ..
+        } => {},
     }
 
     for child in &node.inner {
@@ -156,12 +169,7 @@ pub(crate) fn build_index(
     let mut refs = Vec::new();
     walk(root, &mut defs, &mut refs);
 
-    debug!(
-        "[build-index] collected {} defs, {} refs (original_file={:?})",
-        defs.len(),
-        refs.len(),
-        original_file,
-    );
+    debug!("[build-index] collected {} defs, {} refs (original_file={:?})", defs.len(), refs.len(), original_file,);
 
     if let Some(orig) = original_file {
         for def in &mut defs {
@@ -207,14 +215,8 @@ pub(crate) fn build_index(
     }
 
     for (i, ref_site) in refs.iter().enumerate() {
-        target_id_to_refs
-            .entry(ref_site.target_id.clone())
-            .or_default()
-            .push(i);
-        file_to_refs
-            .entry(ref_site.file.clone())
-            .or_default()
-            .push(i);
+        target_id_to_refs.entry(ref_site.target_id.clone()).or_default().push(i);
+        file_to_refs.entry(ref_site.file.clone()).or_default().push(i);
     }
 
     AstIndex {
@@ -232,7 +234,10 @@ pub(crate) fn build_index(
 ///
 /// Handles the common case where the AST dump reports a canonicalized path
 /// while the temp file list has the original path (or vice versa).
-fn paths_equivalent(a: &str, b: &str) -> bool {
+fn paths_equivalent(
+    a: &str,
+    b: &str,
+) -> bool {
     if a == b {
         return true;
     }

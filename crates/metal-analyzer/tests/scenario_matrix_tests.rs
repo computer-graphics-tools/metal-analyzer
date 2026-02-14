@@ -12,10 +12,7 @@ struct Scenario {
 const SCENARIOS: &[Scenario] = &[
     Scenario {
         id: "include_graph_complexity",
-        fixture_examples: &[
-            "matmul/gemv/shaders/gemv_like.metal",
-            "matmul/gemv/shaders/deep_include_error.metal",
-        ],
+        fixture_examples: &["matmul/gemv/shaders/gemv_like.metal", "matmul/gemv/shaders/deep_include_error.metal"],
         covered_by_tests: &[
             "goto_def_include_resolves_generated_header",
             "diagnostics_report_deep_header_error_on_header_file",
@@ -38,10 +35,7 @@ const SCENARIOS: &[Scenario] = &[
     },
     Scenario {
         id: "include_ambiguity_resolution",
-        fixture_examples: &[
-            "matmul/gemv/shaders/ambiguous_loader_include.metal",
-            "matmul/gemv/shaders/loader.h",
-        ],
+        fixture_examples: &["matmul/gemv/shaders/ambiguous_loader_include.metal", "matmul/gemv/shaders/loader.h"],
         covered_by_tests: &["goto_def_unqualified_loader_resolves_local_header"],
     },
     Scenario {
@@ -80,10 +74,7 @@ const SCENARIOS: &[Scenario] = &[
     },
     Scenario {
         id: "header_owner_context",
-        fixture_examples: &[
-            "matmul/common/problematic_owner_only.h",
-            "matmul/gemv/shaders/owner_context.metal",
-        ],
+        fixture_examples: &["matmul/common/problematic_owner_only.h", "matmul/gemv/shaders/owner_context.metal"],
         covered_by_tests: &["header_open_and_change_use_owner_context_diagnostics"],
     },
     Scenario {
@@ -103,16 +94,8 @@ const SCENARIOS: &[Scenario] = &[
 #[test]
 fn every_scenario_has_mapping_to_tests() {
     for scenario in SCENARIOS {
-        assert!(
-            !scenario.covered_by_tests.is_empty(),
-            "scenario '{}' must map to at least one test",
-            scenario.id
-        );
-        assert!(
-            !scenario.fixture_examples.is_empty(),
-            "scenario '{}' must include fixture examples",
-            scenario.id
-        );
+        assert!(!scenario.covered_by_tests.is_empty(), "scenario '{}' must map to at least one test", scenario.id);
+        assert!(!scenario.fixture_examples.is_empty(), "scenario '{}' must include fixture examples", scenario.id);
     }
 }
 
@@ -121,12 +104,7 @@ fn scenario_fixture_examples_exist() {
     for scenario in SCENARIOS {
         for rel in scenario.fixture_examples {
             let path = fixture_path(rel);
-            assert!(
-                path.exists(),
-                "scenario '{}' references missing fixture: {}",
-                scenario.id,
-                path.display()
-            );
+            assert!(path.exists(), "scenario '{}' references missing fixture: {}", scenario.id, path.display());
         }
     }
 }

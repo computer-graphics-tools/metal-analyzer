@@ -1,9 +1,12 @@
-use crate::definition::AstIndex;
+use crate::{
+    definition::AstIndex,
+    semantic_tokens::{RawToken, mapping::map_ast_kind_to_token_type},
+};
 
-use super::RawToken;
-use super::mapping::map_ast_kind_to_token_type;
-
-pub(crate) fn tokens_from_ast_index(index: &AstIndex, path: &str) -> Vec<RawToken> {
+pub(crate) fn tokens_from_ast_index(
+    index: &AstIndex,
+    path: &str,
+) -> Vec<RawToken> {
     let mut tokens = Vec::new();
 
     for def in &index.defs {

@@ -17,7 +17,11 @@ pub struct Document {
 }
 
 impl Document {
-    pub fn new(uri: Url, text: String, version: i32) -> Self {
+    pub fn new(
+        uri: Url,
+        text: String,
+        version: i32,
+    ) -> Self {
         let line_offsets = Self::compute_line_offsets(&text);
         Self {
             uri,
@@ -37,26 +41,24 @@ impl Document {
 
     /// Return the full text of a given 0-based line (without the trailing newline).
     #[allow(dead_code)]
-    pub fn line_text(&self, line: usize) -> Option<&str> {
+    pub fn line_text(
+        &self,
+        line: usize,
+    ) -> Option<&str> {
         let start = *self.line_offsets.get(line)?;
-        let end = self
-            .line_offsets
-            .get(line + 1)
-            .copied()
-            .unwrap_or(self.text.len());
+        let end = self.line_offsets.get(line + 1).copied().unwrap_or(self.text.len());
         let slice = &self.text[start..end];
         Some(slice.trim_end_matches('\n').trim_end_matches('\r'))
     }
 
     /// Convert an LSP `Position` (line/character, 0-based) to a byte offset.
-    pub fn offset_of(&self, pos: Position) -> Option<usize> {
+    pub fn offset_of(
+        &self,
+        pos: Position,
+    ) -> Option<usize> {
         let line = pos.line as usize;
         let line_start = *self.line_offsets.get(line)?;
-        let line_end = self
-            .line_offsets
-            .get(line + 1)
-            .copied()
-            .unwrap_or(self.text.len());
+        let line_end = self.line_offsets.get(line + 1).copied().unwrap_or(self.text.len());
         let line_text = &self.text[line_start..line_end];
 
         // LSP character offsets are UTF-16 code-unit counts.
@@ -74,17 +76,17 @@ impl Document {
 
     /// Convert a byte offset to an LSP `Position`.
     #[allow(dead_code)]
-    pub fn position_of(&self, offset: usize) -> Position {
+    pub fn position_of(
+        &self,
+        offset: usize,
+    ) -> Position {
         let offset = offset.min(self.text.len());
         let line = match self.line_offsets.binary_search(&offset) {
             Ok(exact) => exact,
             Err(ins) => ins.saturating_sub(1),
         };
         let line_start = self.line_offsets[line];
-        let character = self.text[line_start..offset]
-            .chars()
-            .map(|c| c.len_utf16() as u32)
-            .sum::<u32>();
+        let character = self.text[line_start..offset].chars().map(|c| c.len_utf16() as u32).sum::<u32>();
         Position {
             line: line as u32,
             character,
@@ -94,7 +96,10 @@ impl Document {
     /// Extract the word (identifier) surrounding the given position.
     /// Returns `(word, Range)`.
     #[allow(dead_code)]
-    pub fn word_at(&self, pos: Position) -> Option<(String, Range)> {
+    pub fn word_at(
+        &self,
+        pos: Position,
+    ) -> Option<(String, Range)> {
         let line_text = self.line_text(pos.line as usize)?;
         let chars: Vec<char> = line_text.chars().collect();
 
@@ -163,19 +168,25 @@ impl Document {
     // ── mutations ───────────────────────────────────────────────────────
 
     /// Replace the full content and bump version.
-    pub fn set_content(&mut self, text: String, version: i32) {
+    pub fn set_content(
+        &mut self,
+        text: String,
+        version: i32,
+    ) {
         self.text = text;
         self.version = version;
         self.line_offsets = Self::compute_line_offsets(&self.text);
     }
 
     /// Apply a list of incremental or full-content changes and bump version.
-    pub fn apply_changes(&mut self, changes: Vec<TextDocumentContentChangeEvent>, version: i32) {
+    pub fn apply_changes(
+        &mut self,
+        changes: Vec<TextDocumentContentChangeEvent>,
+        version: i32,
+    ) {
         for change in changes {
             if let Some(range) = change.range {
-                if let (Some(start), Some(end)) =
-                    (self.offset_of(range.start), self.offset_of(range.end))
-                {
+                if let (Some(start), Some(end)) = (self.offset_of(range.start), self.offset_of(range.end)) {
                     self.text.replace_range(start..end, &change.text);
                     self.line_offsets = Self::compute_line_offsets(&self.text);
                 }

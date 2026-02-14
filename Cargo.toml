@@ -3,8 +3,9 @@ members = ["crates/metal-analyzer", "editors/zed"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
+rust-version = "1.93"
 license = "MIT"
 authors = ["Eugene Bokhan <eugenebokhan@icloud.com>"]
 repository = "https://github.com/computer-graphics-tools/metal-analyzer"
@@ -33,6 +34,9 @@ regex = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
+
+# TOML parsing (metalfmt.toml)
+toml = "0.8"
 
 # Concurrent data structures
 dashmap = "6"

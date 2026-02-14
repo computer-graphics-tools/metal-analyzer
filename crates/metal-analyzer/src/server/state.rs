@@ -1,24 +1,23 @@
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
-use std::path::PathBuf;
-use std::collections::BTreeSet;
+use std::{
+    collections::BTreeSet,
+    path::PathBuf,
+    sync::{Arc, atomic::AtomicU64},
+};
 
 use dashmap::DashMap;
 use tokio::sync::RwLock;
-use tower_lsp::Client;
-use tower_lsp::lsp_types::{Diagnostic, Url, WorkspaceFolder};
+use tower_lsp::{
+    Client,
+    lsp_types::{Diagnostic, Url, WorkspaceFolder},
+};
 
-use crate::completion::CompletionProvider;
-use crate::definition::DefinitionProvider;
-use crate::document::DocumentStore;
-use crate::hover::HoverProvider;
-use crate::metal::compiler::MetalCompiler;
-use crate::semantic_tokens::SemanticTokenProvider;
-use crate::symbols::SymbolProvider;
-use crate::syntax::DocumentTrees;
-use super::settings::ServerSettings;
+use crate::{
+    completion::CompletionProvider, definition::DefinitionProvider, document::DocumentStore, hover::HoverProvider,
+    metal::compiler::MetalCompiler, semantic_tokens::SemanticTokenProvider, server::settings::ServerSettings,
+    symbols::SymbolProvider, syntax::DocumentTrees,
+};
 
-/// The Metal Analyzer backend that implements the Language Server Protocol.
+/// The metal-analyzer backend that implements the Language Server Protocol.
 pub struct MetalLanguageServer {
     /// The LSP client handle, used to send notifications (e.g. diagnostics) back.
     pub(crate) client: Client,
@@ -65,6 +64,12 @@ pub struct MetalLanguageServer {
     /// Forward include graph: owner `.metal` file -> included header files.
     pub(crate) owner_headers: Arc<DashMap<PathBuf, BTreeSet<PathBuf>>>,
 
+    /// Monotonic generation for goto-definition requests.
+    ///
+    /// Bumped on every new request so in-flight AST dumps for stale requests
+    /// can be abandoned early instead of blocking newer jumps.
+    pub(crate) goto_def_generation: Arc<AtomicU64>,
+
     /// Debounce generation counter for background AST indexing on edits.
     ///
     /// We bump the counter on every `did_change` and only run the expensive
@@ -90,24 +95,25 @@ impl MetalLanguageServer {
     ///
     /// `_log_messages` is accepted for CLI compatibility but message-level
     /// logging is controlled entirely through the `tracing` subscriber.
-    pub fn new(client: Client, _log_messages: bool) -> Self {
+    pub fn new(
+        client: Client,
+        _log_messages: bool,
+    ) -> Self {
         let document_store = Arc::new(DocumentStore::new());
         let compiler = Arc::new(MetalCompiler::new());
         let completion_provider = Arc::new(CompletionProvider::new());
         let symbol_provider = Arc::new(SymbolProvider::new());
         let definition_provider = Arc::new(DefinitionProvider::new());
-        let hover_provider = Arc::new(HoverProvider::new(
-            Arc::clone(&symbol_provider),
-            Arc::clone(&definition_provider),
-        ));
-        let semantic_token_provider =
-            Arc::new(SemanticTokenProvider::new(Arc::clone(&definition_provider)));
+        let hover_provider =
+            Arc::new(HoverProvider::new(Arc::clone(&symbol_provider), Arc::clone(&definition_provider)));
+        let semantic_token_provider = Arc::new(SemanticTokenProvider::new(Arc::clone(&definition_provider)));
         let document_trees = Arc::new(DocumentTrees::new());
         let diagnostics_generation = Arc::new(DashMap::new());
         let header_owners = Arc::new(DashMap::new());
         let owner_headers = Arc::new(DashMap::new());
         let ast_index_generation = Arc::new(DashMap::new());
         let include_paths_cache = Arc::new(DashMap::new());
+        let goto_def_generation = Arc::new(AtomicU64::new(0));
         let workspace_generation = Arc::new(AtomicU64::new(0));
         let settings = Arc::new(RwLock::new(ServerSettings::default()));
 
@@ -126,6 +132,7 @@ impl MetalLanguageServer {
             diagnostics_generation,
             header_owners,
             owner_headers,
+            goto_def_generation,
             ast_index_generation,
             include_paths_cache,
             workspace_generation,
@@ -137,13 +144,11 @@ impl MetalLanguageServer {
         self.settings.read().await.clone()
     }
 
-    pub(crate) async fn apply_settings(&self, settings: ServerSettings) {
-        let include_paths = settings
-            .compiler
-            .include_paths
-            .iter()
-            .map(PathBuf::from)
-            .collect::<Vec<_>>();
+    pub(crate) async fn apply_settings(
+        &self,
+        settings: ServerSettings,
+    ) {
+        let include_paths = settings.compiler.include_paths.iter().map(PathBuf::from).collect::<Vec<_>>();
         self.compiler.set_include_paths(include_paths);
         self.compiler.set_flags(settings.compiler.extra_flags.clone());
         self.compiler.set_platform(settings.compiler.platform);

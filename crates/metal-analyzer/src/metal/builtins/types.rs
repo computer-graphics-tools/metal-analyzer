@@ -22,7 +22,10 @@ pub struct BuiltinEntry {
 }
 
 impl BuiltinEntry {
-    pub(crate) fn keyword(label: &str, doc: &str) -> Self {
+    pub(crate) fn keyword(
+        label: &str,
+        doc: &str,
+    ) -> Self {
         Self {
             label: label.to_string(),
             detail: "keyword".to_string(),
@@ -34,7 +37,10 @@ impl BuiltinEntry {
         }
     }
 
-    pub(crate) fn typ(label: &str, doc: &str) -> Self {
+    pub(crate) fn typ(
+        label: &str,
+        doc: &str,
+    ) -> Self {
         Self {
             label: label.to_string(),
             detail: "builtin type".to_string(),
@@ -46,7 +52,12 @@ impl BuiltinEntry {
         }
     }
 
-    pub(crate) fn func(label: &str, detail: &str, doc: &str, cat: &'static str) -> Self {
+    pub(crate) fn func(
+        label: &str,
+        detail: &str,
+        doc: &str,
+        cat: &'static str,
+    ) -> Self {
         Self {
             label: label.to_string(),
             detail: detail.to_string(),
@@ -58,7 +69,11 @@ impl BuiltinEntry {
         }
     }
 
-    pub(crate) fn attr(label: &str, doc: &str, snippet: Option<&str>) -> Self {
+    pub(crate) fn attr(
+        label: &str,
+        doc: &str,
+        snippet: Option<&str>,
+    ) -> Self {
         Self {
             label: label.to_string(),
             detail: "attribute".to_string(),
@@ -70,7 +85,11 @@ impl BuiltinEntry {
         }
     }
 
-    pub(crate) fn snippet(label: &str, detail: &str, snippet: &str) -> Self {
+    pub(crate) fn snippet(
+        label: &str,
+        detail: &str,
+        snippet: &str,
+    ) -> Self {
         Self {
             label: label.to_string(),
             detail: detail.to_string(),
@@ -82,7 +101,11 @@ impl BuiltinEntry {
         }
     }
 
-    pub(crate) fn constant(label: &str, detail: &str, doc: &str) -> Self {
+    pub(crate) fn constant(
+        label: &str,
+        detail: &str,
+        doc: &str,
+    ) -> Self {
         Self {
             label: label.to_string(),
             detail: detail.to_string(),

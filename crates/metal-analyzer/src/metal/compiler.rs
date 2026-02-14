@@ -1,8 +1,13 @@
+use std::{
+    collections::{BTreeSet, HashSet},
+    path::{Path, PathBuf},
+    sync::{
+        RwLock,
+        atomic::{AtomicU64, Ordering},
+    },
+};
+
 use regex::Regex;
-use std::collections::{BTreeSet, HashSet};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::RwLock;
 use tokio::process::Command;
 use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
 use tracing::{debug, error, warn};
@@ -10,41 +15,49 @@ use tracing::{debug, error, warn};
 static NEXT_COMPILATION_ID: AtomicU64 = AtomicU64::new(1);
 const METAL_MACOS_DEFINE: &str = "-D__METAL_MACOS__";
 const METAL_IOS_DEFINE: &str = "-D__METAL_IOS__";
+const METAL_TVOS_DEFINE: &str = "-D__METAL_TVOS__";
+const METAL_WATCHOS_DEFINE: &str = "-D__METAL_WATCHOS__";
+const METAL_XROS_DEFINE: &str = "-D__METAL_XROS__";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum CompilerPlatform {
+pub enum CompilerPlatform {
     #[default]
-    Auto,
     Macos,
     Ios,
-    None,
+    Tvos,
+    Watchos,
+    Xros,
 }
 
 impl CompilerPlatform {
-    pub(crate) fn from_setting_value(value: &str) -> Self {
+    pub fn from_setting_value(value: &str) -> Self {
         match value.trim().to_ascii_lowercase().as_str() {
-            "auto" => Self::Auto,
             "macos" => Self::Macos,
             "ios" => Self::Ios,
-            "none" => Self::None,
-            _ => Self::Auto,
+            "tvos" => Self::Tvos,
+            "watchos" => Self::Watchos,
+            "xros" | "visionos" => Self::Xros,
+            _ => Self::Macos,
         }
     }
 
-    pub(crate) fn as_setting_value(self) -> &'static str {
+    pub fn as_setting_value(self) -> &'static str {
         match self {
-            Self::Auto => "auto",
             Self::Macos => "macos",
             Self::Ios => "ios",
-            Self::None => "none",
+            Self::Tvos => "tvos",
+            Self::Watchos => "watchos",
+            Self::Xros => "xros",
         }
     }
 
-    fn default_injected_define(self) -> Option<&'static str> {
+    fn default_injected_define(self) -> &'static str {
         match self {
-            Self::Auto | Self::Macos => Some(METAL_MACOS_DEFINE),
-            Self::Ios => Some(METAL_IOS_DEFINE),
-            Self::None => None,
+            Self::Macos => METAL_MACOS_DEFINE,
+            Self::Ios => METAL_IOS_DEFINE,
+            Self::Tvos => METAL_TVOS_DEFINE,
+            Self::Watchos => METAL_WATCHOS_DEFINE,
+            Self::Xros => METAL_XROS_DEFINE,
         }
     }
 }
@@ -75,16 +88,15 @@ fn xcrun_command() -> Command {
 /// * `workspace_roots` - Optional list of workspace root paths. If provided,
 ///   ancestor walking stops at the nearest workspace root. If `None`, walks
 ///   all the way to the filesystem root.
-pub fn compute_include_paths(file_path: &Path, workspace_roots: Option<&[PathBuf]>) -> Vec<String> {
+pub fn compute_include_paths(
+    file_path: &Path,
+    workspace_roots: Option<&[PathBuf]>,
+) -> Vec<String> {
     let mut unique = BTreeSet::new();
 
     // Find the workspace root that contains this file (if any)
-    let workspace_root = workspace_roots.and_then(|roots| {
-        roots
-            .iter()
-            .find(|root| file_path.starts_with(root))
-            .cloned()
-    });
+    let workspace_root =
+        workspace_roots.and_then(|roots| roots.iter().find(|root| file_path.starts_with(root)).cloned());
 
     // Helper to add a directory and its immediate children
     let add_dir_and_children = |dir: &Path, unique: &mut BTreeSet<String>| {
@@ -96,10 +108,7 @@ pub fn compute_include_paths(file_path: &Path, workspace_roots: Option<&[PathBuf
             for entry in entries.flatten() {
                 let child_path = entry.path();
                 if child_path.is_dir() {
-                    let name = child_path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("");
+                    let name = child_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
                     // Filter out unwanted directories
                     if !should_exclude_dir(name) {
                         unique.insert(child_path.to_string_lossy().into_owned());
@@ -126,7 +135,7 @@ pub fn compute_include_paths(file_path: &Path, workspace_roots: Option<&[PathBuf
             match current.parent() {
                 Some(parent) if parent != current => {
                     current = parent;
-                }
+                },
                 _ => break,
             }
         }
@@ -156,10 +165,7 @@ fn should_exclude_dir(name: &str) -> bool {
     }
 
     // Common build/artifact directories
-    matches!(
-        name,
-        "target" | "build" | "node_modules" | ".git" | ".cargo" | "out" | "bin" | "obj"
-    )
+    matches!(name, "target" | "build" | "node_modules" | ".git" | ".cargo" | "out" | "bin" | "obj")
 }
 
 fn parse_include_search_paths(raw_output: &str) -> Vec<PathBuf> {
@@ -183,9 +189,7 @@ fn parse_include_search_paths(raw_output: &str) -> Vec<PathBuf> {
         }
 
         // Clang may annotate framework roots as " (framework directory)".
-        let path_text = trimmed
-            .trim_end_matches(" (framework directory)")
-            .trim_matches('"');
+        let path_text = trimmed.trim_end_matches(" (framework directory)").trim_matches('"');
         if let Some(path) = normalize_existing_path(PathBuf::from(path_text)) {
             discovered_paths.push(path);
         }
@@ -326,8 +330,7 @@ impl MetalCompiler {
             warn!("Failed to create temp directory {:?}: {}", temp_dir, e);
         }
 
-        let diagnostic_re =
-            Regex::new(r"^(.*?):(\d+):(\d+):\s*(error|warning|note):\s*(.*)$").unwrap();
+        let diagnostic_re = Regex::new(r"^(.*?):(\d+):(\d+):\s*(error|warning|note):\s*(.*)$").unwrap();
 
         Self {
             temp_dir,
@@ -335,7 +338,7 @@ impl MetalCompiler {
             system_include_paths: RwLock::new(Vec::new()),
             extra_include_paths: RwLock::new(Vec::new()),
             extra_flags: RwLock::new(Vec::new()),
-            platform: RwLock::new(CompilerPlatform::Auto),
+            platform: RwLock::new(CompilerPlatform::Macos),
             include_discovery_lock: tokio::sync::Mutex::new(()),
             toolchain_signature: RwLock::new(None),
         }
@@ -345,11 +348,13 @@ impl MetalCompiler {
     /// This allows us to resolve `<metal_stdlib>` and other system headers.
     pub async fn discover_system_includes(&self) {
         let detected_signature = Self::detect_toolchain_signature().await;
-        self.discover_system_includes_with_signature(detected_signature)
-            .await;
+        self.discover_system_includes_with_signature(detected_signature).await;
     }
 
-    async fn discover_system_includes_with_signature(&self, detected_signature: Option<String>) {
+    async fn discover_system_includes_with_signature(
+        &self,
+        detected_signature: Option<String>,
+    ) {
         let mut command = xcrun_command();
         let output = match command
             .args(["metal", "-v", "-E", "-"]) // -E to preprocess, - to read from stdin
@@ -364,16 +369,13 @@ impl MetalCompiler {
                     self.store_toolchain_signature(Some(signature));
                 }
                 return;
-            }
+            },
         };
 
         // Different Xcode / toolchain versions can print include search details to
         // either stderr or stdout, so we parse both streams.
-        let discovery_output = format!(
-            "{}\n{}",
-            String::from_utf8_lossy(&output.stderr),
-            String::from_utf8_lossy(&output.stdout)
-        );
+        let discovery_output =
+            format!("{}\n{}", String::from_utf8_lossy(&output.stderr), String::from_utf8_lossy(&output.stdout));
         let mut paths = parse_include_search_paths(&discovery_output);
         if paths.is_empty() {
             paths = fallback_include_paths_from_toolchain_signature(detected_signature.as_deref());
@@ -403,8 +405,7 @@ impl MetalCompiler {
         if self.include_cache_is_fresh(detected_signature.as_deref()) {
             return;
         }
-        self.discover_system_includes_with_signature(detected_signature)
-            .await;
+        self.discover_system_includes_with_signature(detected_signature).await;
     }
 
     // ── Configuration ────────────────────────────────────────────────────
@@ -413,7 +414,10 @@ impl MetalCompiler {
     ///
     /// These are passed as `-I <path>` to the compiler and help resolve
     /// relative `#include` directives in projects with deep directory trees.
-    pub fn add_include_paths(&self, paths: impl IntoIterator<Item = PathBuf>) {
+    pub fn add_include_paths(
+        &self,
+        paths: impl IntoIterator<Item = PathBuf>,
+    ) {
         if let Ok(mut guard) = self.extra_include_paths.write() {
             guard.extend(paths);
         }
@@ -421,21 +425,18 @@ impl MetalCompiler {
 
     /// Return a snapshot of the currently registered extra include paths.
     pub fn get_include_paths(&self) -> Vec<PathBuf> {
-        self.extra_include_paths
-            .read()
-            .map(|guard| guard.clone())
-            .unwrap_or_default()
+        self.extra_include_paths.read().map(|guard| guard.clone()).unwrap_or_default()
     }
 
     /// Return the discovered system include paths.
     pub fn get_system_include_paths(&self) -> Vec<PathBuf> {
-        self.system_include_paths
-            .read()
-            .map(|g| g.clone())
-            .unwrap_or_default()
+        self.system_include_paths.read().map(|g| g.clone()).unwrap_or_default()
     }
 
-    fn include_cache_is_fresh(&self, detected_signature: Option<&str>) -> bool {
+    fn include_cache_is_fresh(
+        &self,
+        detected_signature: Option<&str>,
+    ) -> bool {
         let include_paths = self.get_system_include_paths();
         if include_paths.is_empty() {
             return false;
@@ -450,18 +451,17 @@ impl MetalCompiler {
         let Some(detected_signature) = detected_signature else {
             return true;
         };
-        self.cached_toolchain_signature()
-            .is_some_and(|cached_signature| cached_signature == detected_signature)
+        self.cached_toolchain_signature().is_some_and(|cached_signature| cached_signature == detected_signature)
     }
 
     fn cached_toolchain_signature(&self) -> Option<String> {
-        self.toolchain_signature
-            .read()
-            .map(|signature| signature.clone())
-            .unwrap_or(None)
+        self.toolchain_signature.read().map(|signature| signature.clone()).unwrap_or(None)
     }
 
-    fn store_toolchain_signature(&self, signature: Option<String>) {
+    fn store_toolchain_signature(
+        &self,
+        signature: Option<String>,
+    ) {
         if let Ok(mut guard) = self.toolchain_signature.write() {
             *guard = signature;
         }
@@ -478,17 +478,15 @@ impl MetalCompiler {
             return None;
         }
         let path = PathBuf::from(raw_path);
-        Some(
-            path.canonicalize()
-                .unwrap_or(path)
-                .display()
-                .to_string(),
-        )
+        Some(path.canonicalize().unwrap_or(path).display().to_string())
     }
 
     /// Register additional compiler flags (e.g. `-std=metal4.0`, `-DFOO=1`).
     #[allow(dead_code)]
-    pub fn add_flags(&self, flags: impl IntoIterator<Item = String>) {
+    pub fn add_flags(
+        &self,
+        flags: impl IntoIterator<Item = String>,
+    ) {
         if let Ok(mut guard) = self.extra_flags.write() {
             guard.extend(flags);
         }
@@ -496,7 +494,10 @@ impl MetalCompiler {
 
     /// Replace all extra include paths with the given set.
     #[allow(dead_code)]
-    pub fn set_include_paths(&self, paths: Vec<PathBuf>) {
+    pub fn set_include_paths(
+        &self,
+        paths: Vec<PathBuf>,
+    ) {
         if let Ok(mut guard) = self.extra_include_paths.write() {
             *guard = paths;
         }
@@ -504,14 +505,20 @@ impl MetalCompiler {
 
     /// Replace all extra flags with the given set.
     #[allow(dead_code)]
-    pub fn set_flags(&self, flags: Vec<String>) {
+    pub fn set_flags(
+        &self,
+        flags: Vec<String>,
+    ) {
         if let Ok(mut guard) = self.extra_flags.write() {
             *guard = flags;
         }
     }
 
     /// Configure how diagnostics compilation should infer Metal platform macros.
-    pub(crate) fn set_platform(&self, platform: CompilerPlatform) {
+    pub fn set_platform(
+        &self,
+        platform: CompilerPlatform,
+    ) {
         if let Ok(mut guard) = self.platform.write() {
             *guard = platform;
         }
@@ -525,7 +532,10 @@ impl MetalCompiler {
     ///
     /// This makes it easy to resolve includes from anywhere inside a
     /// monorepo-style project without requiring per-file configuration.
-    pub fn add_workspace_roots(&self, roots: &[PathBuf]) {
+    pub fn add_workspace_roots(
+        &self,
+        roots: &[PathBuf],
+    ) {
         let mut paths = Vec::new();
         for root in roots {
             if root.is_dir() {
@@ -551,7 +561,11 @@ impl MetalCompiler {
     ///
     /// * `source` – the full text of the Metal shader file.
     /// * `uri` – the original document URI (used to derive include paths).
-    pub async fn compile(&self, source: &str, uri: &str) -> Vec<MetalDiagnostic> {
+    pub async fn compile(
+        &self,
+        source: &str,
+        uri: &str,
+    ) -> Vec<MetalDiagnostic> {
         let mut include_paths = Self::include_paths_from_uri(uri);
         include_paths.extend(self.get_system_include_paths().iter().map(|p| p.display().to_string()));
         self.compile_with_include_paths(source, uri, &include_paths).await
@@ -609,11 +623,7 @@ impl MetalCompiler {
 
         // ── Effective flags ──────────────────────────────────────────────
         let (platform, effective_flags) = self.resolve_effective_flags();
-        debug!(
-            "Resolved compiler flags (platform={}): {:?}",
-            platform.as_setting_value(),
-            effective_flags
-        );
+        debug!("Resolved compiler flags (platform={}): {:?}", platform.as_setting_value(), effective_flags);
         args.extend(effective_flags);
 
         debug!("Running: xcrun {}", args.join(" "));
@@ -631,15 +641,9 @@ impl MetalCompiler {
                 let original_path = uri.strip_prefix("file://").map(|s| s.replace("%20", " "));
                 self.parse_diagnostics(&stderr)
                     .into_iter()
-                    .map(|diag| {
-                        remap_diagnostic_file(
-                            diag,
-                            original_path.as_deref(),
-                            &temp_file,
-                        )
-                    })
+                    .map(|diag| remap_diagnostic_file(diag, original_path.as_deref(), &temp_file))
                     .collect()
-            }
+            },
             Err(e) => {
                 error!("Failed to run Metal compiler: {}", e);
                 vec![MetalDiagnostic {
@@ -649,25 +653,23 @@ impl MetalCompiler {
                     severity: DiagnosticSeverity::ERROR,
                     message: format!("Failed to run Metal compiler: {e}"),
                 }]
-            }
+            },
         }
     }
 
     /// Check whether the Metal compiler toolchain is available on this system.
     pub async fn is_available() -> bool {
         let mut command = xcrun_command();
-        command
-            .args(["--find", "metal"])
-            .output()
-            .await
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        command.args(["--find", "metal"]).output().await.map(|o| o.status.success()).unwrap_or(false)
     }
 
     // ── Private helpers ──────────────────────────────────────────────────
 
     /// Parse the compiler's stderr output into a list of diagnostics.
-    fn parse_diagnostics(&self, output: &str) -> Vec<MetalDiagnostic> {
+    fn parse_diagnostics(
+        &self,
+        output: &str,
+    ) -> Vec<MetalDiagnostic> {
         let mut diagnostics = Vec::new();
 
         for line in output.lines() {
@@ -682,7 +684,10 @@ impl MetalCompiler {
     /// Attempt to parse a single line of compiler output.
     ///
     /// Expected format: `filename:line:column: severity: message`
-    fn parse_diagnostic_line(&self, line: &str) -> Option<MetalDiagnostic> {
+    fn parse_diagnostic_line(
+        &self,
+        line: &str,
+    ) -> Option<MetalDiagnostic> {
         let caps = self.diagnostic_re.captures(line)?;
 
         let file = caps.get(1).map(|m| m.as_str().to_owned());
@@ -749,7 +754,11 @@ impl MetalCompiler {
         result
     }
 
-    fn collect_include_paths(&self, _uri: &str, include_paths: &[String]) -> Vec<String> {
+    fn collect_include_paths(
+        &self,
+        _uri: &str,
+        include_paths: &[String],
+    ) -> Vec<String> {
         let mut merged = BTreeSet::new();
 
         // Callers already provide ancestor paths (via compute_include_paths or
@@ -768,29 +777,22 @@ impl MetalCompiler {
     }
 
     fn resolve_effective_flags(&self) -> (CompilerPlatform, Vec<String>) {
-        let user_flags = self
-            .extra_flags
-            .read()
-            .map(|guard| guard.clone())
-            .unwrap_or_default();
-        let platform = self
-            .platform
-            .read()
-            .map(|guard| *guard)
-            .unwrap_or_default();
+        let user_flags = self.extra_flags.read().map(|guard| guard.clone()).unwrap_or_default();
+        let platform = self.platform.read().map(|guard| *guard).unwrap_or_default();
 
         (platform, Self::build_effective_flags(&user_flags, platform))
     }
 
-    fn build_effective_flags(user_flags: &[String], platform: CompilerPlatform) -> Vec<String> {
+    fn build_effective_flags(
+        user_flags: &[String],
+        platform: CompilerPlatform,
+    ) -> Vec<String> {
         let mut effective_flags = user_flags.to_vec();
         if Self::flags_define_platform_context(user_flags) {
             return effective_flags;
         }
 
-        if let Some(default_define) = platform.default_injected_define() {
-            effective_flags.push(default_define.to_string());
-        }
+        effective_flags.push(platform.default_injected_define().to_string());
 
         effective_flags
     }
@@ -803,9 +805,7 @@ impl MetalCompiler {
             }
 
             if flag.trim().eq_ignore_ascii_case("-D")
-                && iter
-                    .peek()
-                    .is_some_and(|next_flag| Self::is_platform_macro_name(next_flag))
+                && iter.peek().is_some_and(|next_flag| Self::is_platform_macro_name(next_flag))
             {
                 return true;
             }
@@ -816,10 +816,7 @@ impl MetalCompiler {
 
     fn is_platform_define_flag(flag: &str) -> bool {
         let trimmed = flag.trim();
-        if let Some(define_body) = trimmed
-            .strip_prefix("-D")
-            .or_else(|| trimmed.strip_prefix("-d"))
-        {
+        if let Some(define_body) = trimmed.strip_prefix("-D").or_else(|| trimmed.strip_prefix("-d")) {
             return Self::is_platform_macro_name(define_body);
         }
 
@@ -827,20 +824,17 @@ impl MetalCompiler {
     }
 
     fn is_platform_macro_name(raw_value: &str) -> bool {
-        let macro_name = raw_value
-            .trim()
-            .split_once('=')
-            .map_or(raw_value.trim(), |(name, _)| name.trim());
+        let macro_name = raw_value.trim().split_once('=').map_or(raw_value.trim(), |(name, _)| name.trim());
         macro_name.eq_ignore_ascii_case("__METAL_MACOS__")
             || macro_name.eq_ignore_ascii_case("__METAL_IOS__")
+            || macro_name.eq_ignore_ascii_case("__METAL_TVOS__")
+            || macro_name.eq_ignore_ascii_case("__METAL_WATCHOS__")
+            || macro_name.eq_ignore_ascii_case("__METAL_XROS__")
     }
 
     fn is_target_or_sdk_flag(flag: &str) -> bool {
         let normalized = flag.trim().to_ascii_lowercase();
-        if matches!(
-            normalized.as_str(),
-            "-target" | "--target" | "-isysroot" | "-sdk"
-        ) {
+        if matches!(normalized.as_str(), "-target" | "--target" | "-isysroot" | "-sdk") {
             return true;
         }
 
@@ -861,8 +855,7 @@ fn remap_diagnostic_file(
         return diagnostic;
     };
     let diag_path = Path::new(&raw_file);
-    let temp_matches = diag_path == temp_file
-        || diag_path.canonicalize().ok() == temp_file.canonicalize().ok();
+    let temp_matches = diag_path == temp_file || diag_path.canonicalize().ok() == temp_file.canonicalize().ok();
     if temp_matches {
         if let Some(original) = original_path {
             diagnostic.file = Some(original.to_owned());
@@ -872,21 +865,10 @@ fn remap_diagnostic_file(
         && let Some(parent) = Path::new(original).parent()
     {
         let resolved = parent.join(diag_path);
-        diagnostic.file = Some(
-            resolved
-                .canonicalize()
-                .unwrap_or(resolved)
-                .display()
-                .to_string(),
-        );
+        diagnostic.file = Some(resolved.canonicalize().unwrap_or(resolved).display().to_string());
     } else {
-        diagnostic.file = Some(
-            diag_path
-                .canonicalize()
-                .unwrap_or_else(|_| diag_path.to_path_buf())
-                .display()
-                .to_string(),
-        );
+        diagnostic.file =
+            Some(diag_path.canonicalize().unwrap_or_else(|_| diag_path.to_path_buf()).display().to_string());
     }
     diagnostic
 }

@@ -9,6 +9,7 @@ import { execFile } from "node:child_process";
 import { constants as fsConstants, createWriteStream } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as https from "node:https";
+import * as os from "node:os";
 import * as path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
@@ -42,13 +43,40 @@ export async function activate(context: vscode.ExtensionContext) {
   await recreateClientForConfiguration(context);
 
   context.subscriptions.push(
+    vscode.commands.registerCommand("metal-analyzer.startServer", () => {
+      return startClient(context);
+    }),
+    vscode.commands.registerCommand("metal-analyzer.stopServer", () => {
+      return stopClient();
+    }),
+    vscode.commands.registerCommand("metal-analyzer.restartServer", () => {
+      return restartClient();
+    }),
+    vscode.commands.registerCommand("metal-analyzer.showOutput", () => {
+      client?.outputChannel.show();
+    }),
+    vscode.commands.registerCommand("metal-analyzer.openLogs", () => {
+      return openLogFile();
+    }),
+    vscode.commands.registerCommand("metal-analyzer.serverVersion", () => {
+      return showServerVersion();
+    }),
+  );
+
+  context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((event) => {
-      if (!event.affectsConfiguration("metal-analyzer.serverPath")) {
+      const requiresRestart =
+        event.affectsConfiguration("metal-analyzer.serverPath") ||
+        event.affectsConfiguration("metal-analyzer.threadPool.workerThreads") ||
+        event.affectsConfiguration(
+          "metal-analyzer.threadPool.formattingThreads",
+        );
+      if (!requiresRestart) {
         return;
       }
 
       void recreateClientForConfiguration(context);
-    })
+    }),
   );
 }
 
@@ -69,7 +97,7 @@ async function notifyUnexpectedShutdown(): Promise<void> {
 
   const action = await vscode.window.showErrorMessage(
     "metal-analyzer shut down unexpectedly. Metal language features are unavailable until the server restarts.",
-    "Restart metal-analyzer"
+    "Restart metal-analyzer",
   );
 
   if (action === "Restart metal-analyzer") {
@@ -91,11 +119,76 @@ async function restartClient(): Promise<void> {
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     void vscode.window.showErrorMessage(
-      `Failed to restart metal-analyzer: ${errorMessage}`
+      `Failed to restart metal-analyzer: ${errorMessage}`,
     );
   } finally {
     isRestartingClient = false;
   }
+}
+
+async function startClient(context: vscode.ExtensionContext): Promise<void> {
+  if (client && client.state === State.Running) {
+    return;
+  }
+
+  if (client) {
+    try {
+      await client.start();
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      void vscode.window.showErrorMessage(
+        `Failed to start metal-analyzer: ${errorMessage}`,
+      );
+    }
+    return;
+  }
+
+  await recreateClientForConfiguration(context);
+}
+
+async function stopClient(): Promise<void> {
+  if (!client || client.state === State.Stopped) {
+    return;
+  }
+
+  try {
+    await client.stop();
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    void vscode.window.showErrorMessage(
+      `Failed to stop metal-analyzer: ${errorMessage}`,
+    );
+  }
+}
+
+async function openLogFile(): Promise<void> {
+  const logPath = path.join(
+    os.homedir(),
+    ".metal-analyzer",
+    "metal-analyzer.log",
+  );
+  try {
+    await fs.access(logPath);
+    const uri = vscode.Uri.file(logPath);
+    await vscode.window.showTextDocument(uri);
+  } catch {
+    void vscode.window.showWarningMessage(`Log file not found: ${logPath}`);
+  }
+}
+
+function showServerVersion(): void {
+  if (!client || client.state !== State.Running) {
+    void vscode.window.showInformationMessage(
+      "metal-analyzer: server is not running",
+    );
+    return;
+  }
+
+  const serverInfo = client.initializeResult?.serverInfo;
+  const version = serverInfo?.version ?? "unknown";
+  const name = serverInfo?.name ?? "metal-analyzer";
+  void vscode.window.showInformationMessage(`${name} v${version}`);
 }
 
 function createLanguageClient(serverPath: string): LanguageClient {
@@ -111,13 +204,17 @@ function createLanguageClient(serverPath: string): LanguageClient {
     synchronize: {
       configurationSection: "metal-analyzer",
     },
+    outputChannelName: "metal-analyzer",
+    traceOutputChannel: vscode.window.createOutputChannel(
+      "metal-analyzer (LSP Trace)",
+    ),
   };
 
   return new LanguageClient(
     "metal-analyzer",
-    "Metal Analyzer",
+    "metal-analyzer",
     serverOptions,
-    clientOptions
+    clientOptions,
   );
 }
 
@@ -141,6 +238,11 @@ function buildServerInitializationOptions(): Record<string, unknown> {
         enabled: config.get<boolean>("indexing.enabled", true),
         concurrency: config.get<number>("indexing.concurrency", 1),
         maxFileSizeKb: config.get<number>("indexing.maxFileSizeKb", 512),
+        projectGraphDepth: config.get<number>("indexing.projectGraphDepth", 3),
+        projectGraphMaxNodes: config.get<number>(
+          "indexing.projectGraphMaxNodes",
+          256,
+        ),
         excludePaths: config.get<string[]>("indexing.excludePaths", []),
       },
       compiler: {
@@ -151,13 +253,20 @@ function buildServerInitializationOptions(): Record<string, unknown> {
       logging: {
         level: config.get<string>("logging.level", "info"),
       },
+      threadPool: {
+        workerThreads: config.get<number>("threadPool.workerThreads", 0),
+        formattingThreads: config.get<number>(
+          "threadPool.formattingThreads",
+          1,
+        ),
+      },
     },
   };
 }
 
 function registerClientStateSubscription(
   context: vscode.ExtensionContext,
-  languageClient: LanguageClient
+  languageClient: LanguageClient,
 ): void {
   clientStateSubscription?.dispose();
   clientStateSubscription = languageClient.onDidChangeState((event) => {
@@ -167,7 +276,9 @@ function registerClientStateSubscription(
     }
 
     const stoppedUnexpectedly =
-      event.newState === State.Stopped && !isDeactivating && !isRestartingClient;
+      event.newState === State.Stopped &&
+      !isDeactivating &&
+      !isRestartingClient;
     if (!stoppedUnexpectedly) {
       return;
     }
@@ -178,7 +289,7 @@ function registerClientStateSubscription(
 }
 
 async function recreateClientForConfiguration(
-  context: vscode.ExtensionContext
+  context: vscode.ExtensionContext,
 ): Promise<void> {
   if (isRestartingClient) {
     return;
@@ -204,7 +315,7 @@ async function recreateClientForConfiguration(
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     void vscode.window.showErrorMessage(
-      `Failed to start metal-analyzer with updated configuration: ${errorMessage}`
+      `Failed to start metal-analyzer with updated configuration: ${errorMessage}`,
     );
   } finally {
     isRestartingClient = false;
@@ -213,9 +324,8 @@ async function recreateClientForConfiguration(
 
 async function resolveServerPath(
   context: vscode.ExtensionContext,
-  configuredServerPath: string
+  configuredServerPath: string,
 ): Promise<string> {
-  // Respect user override and skip auto-install logic.
   if (configuredServerPath !== SERVER_NAME) {
     return configuredServerPath;
   }
@@ -233,13 +343,14 @@ async function resolveServerPath(
         location: vscode.ProgressLocation.Notification,
         title: "Installing metal-analyzer",
       },
-      async () => ensureLatestDownloadedBinary(installRoot)
+      async () => ensureLatestDownloadedBinary(installRoot),
     );
   } catch (error) {
     if (cachedBinaryPath) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       vscode.window.showWarningMessage(
-        `metal-analyzer update failed, using cached binary: ${errorMessage}`
+        `metal-analyzer update failed, using cached binary: ${errorMessage}`,
       );
       return cachedBinaryPath;
     }
@@ -266,7 +377,7 @@ async function isCommandAvailable(command: string): Promise<boolean> {
 function releaseAssetNameForCurrentPlatform(): string {
   if (process.platform !== "darwin") {
     throw new Error(
-      "metal-analyzer auto-install currently supports macOS only. Install manually and set metal-analyzer.serverPath."
+      "metal-analyzer auto-install currently supports macOS only. Install manually and set metal-analyzer.serverPath.",
     );
   }
 
@@ -278,16 +389,20 @@ function releaseAssetNameForCurrentPlatform(): string {
   }
 
   throw new Error(
-    `Unsupported macOS architecture: ${process.arch}. Install manually and set metal-analyzer.serverPath.`
+    `Unsupported macOS architecture: ${process.arch}. Install manually and set metal-analyzer.serverPath.`,
   );
 }
 
-async function ensureLatestDownloadedBinary(installRoot: string): Promise<string> {
+async function ensureLatestDownloadedBinary(
+  installRoot: string,
+): Promise<string> {
   await fs.mkdir(installRoot, { recursive: true });
 
   const release = await fetchLatestRelease();
   const assetName = releaseAssetNameForCurrentPlatform();
-  const matchingAsset = release.assets.find((asset) => asset.name === assetName);
+  const matchingAsset = release.assets.find(
+    (asset) => asset.name === assetName,
+  );
   if (!matchingAsset) {
     throw new Error(`No release asset found for ${assetName}`);
   }
@@ -325,7 +440,7 @@ async function fetchLatestRelease(): Promise<GithubRelease> {
     throw new Error(
       `Failed to parse GitHub release metadata: ${
         error instanceof Error ? error.message : String(error)
-      }`
+      }`,
     );
   }
 
@@ -341,20 +456,23 @@ function isGithubRelease(value: unknown): value is GithubRelease {
     return false;
   }
   const candidate = value as Partial<GithubRelease>;
-  if (typeof candidate.tag_name !== "string" || !Array.isArray(candidate.assets)) {
+  if (
+    typeof candidate.tag_name !== "string" ||
+    !Array.isArray(candidate.assets)
+  ) {
     return false;
   }
 
   return candidate.assets.every(
     (asset) =>
       typeof asset?.name === "string" &&
-      typeof asset?.browser_download_url === "string"
+      typeof asset?.browser_download_url === "string",
   );
 }
 
 async function httpGetBuffer(
   url: string,
-  headers: Record<string, string>
+  headers: Record<string, string>,
 ): Promise<Buffer> {
   return new Promise<Buffer>((resolve, reject) => {
     const request = https.get(url, { headers }, (response) => {
@@ -363,7 +481,10 @@ async function httpGetBuffer(
         [301, 302, 303, 307, 308].includes(statusCode) &&
         typeof response.headers.location === "string"
       ) {
-        const redirectedUrl = new URL(response.headers.location, url).toString();
+        const redirectedUrl = new URL(
+          response.headers.location,
+          url,
+        ).toString();
         response.resume();
         httpGetBuffer(redirectedUrl, headers).then(resolve).catch(reject);
         return;
@@ -371,7 +492,9 @@ async function httpGetBuffer(
 
       if (statusCode !== 200) {
         response.resume();
-        reject(new Error(`GitHub API request failed with status ${statusCode}`));
+        reject(
+          new Error(`GitHub API request failed with status ${statusCode}`),
+        );
         return;
       }
 
@@ -387,7 +510,10 @@ async function httpGetBuffer(
   });
 }
 
-async function downloadFile(url: string, destinationPath: string): Promise<void> {
+async function downloadFile(
+  url: string,
+  destinationPath: string,
+): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const request = https.get(
       url,
@@ -403,9 +529,14 @@ async function downloadFile(url: string, destinationPath: string): Promise<void>
           [301, 302, 303, 307, 308].includes(statusCode) &&
           typeof response.headers.location === "string"
         ) {
-          const redirectedUrl = new URL(response.headers.location, url).toString();
+          const redirectedUrl = new URL(
+            response.headers.location,
+            url,
+          ).toString();
           response.resume();
-          downloadFile(redirectedUrl, destinationPath).then(resolve).catch(reject);
+          downloadFile(redirectedUrl, destinationPath)
+            .then(resolve)
+            .catch(reject);
           return;
         }
 
@@ -417,14 +548,17 @@ async function downloadFile(url: string, destinationPath: string): Promise<void>
 
         const fileStream = createWriteStream(destinationPath);
         pipeline(response, fileStream).then(resolve).catch(reject);
-      }
+      },
     );
 
     request.on("error", reject);
   });
 }
 
-async function extractArchive(archivePath: string, outputDirectory: string): Promise<void> {
+async function extractArchive(
+  archivePath: string,
+  outputDirectory: string,
+): Promise<void> {
   await execFileAsync("tar", ["-xzf", archivePath, "-C", outputDirectory]);
 }
 
@@ -438,21 +572,24 @@ async function isExecutable(filePath: string): Promise<boolean> {
 }
 
 async function findNewestInstalledBinary(
-  installRoot: string
+  installRoot: string,
 ): Promise<string | undefined> {
   let entries: Array<{ path: string; modifiedAtMs: number }> = [];
   try {
-    const directoryEntries = await fs.readdir(installRoot, { withFileTypes: true });
+    const directoryEntries = await fs.readdir(installRoot, {
+      withFileTypes: true,
+    });
     const candidateStats = await Promise.all(
       directoryEntries
         .filter(
-          (entry) => entry.isDirectory() && entry.name.startsWith(`${SERVER_NAME}-`)
+          (entry) =>
+            entry.isDirectory() && entry.name.startsWith(`${SERVER_NAME}-`),
         )
         .map(async (entry) => {
           const entryPath = path.join(installRoot, entry.name);
           const stat = await fs.stat(entryPath);
           return { path: entryPath, modifiedAtMs: stat.mtimeMs };
-        })
+        }),
     );
     entries = candidateStats;
   } catch {
@@ -460,7 +597,7 @@ async function findNewestInstalledBinary(
   }
 
   const sortedEntries = entries.sort(
-    (left, right) => right.modifiedAtMs - left.modifiedAtMs
+    (left, right) => right.modifiedAtMs - left.modifiedAtMs,
   );
 
   for (const entry of sortedEntries) {
@@ -475,7 +612,7 @@ async function findNewestInstalledBinary(
 
 async function removeOutdatedInstalledVersions(
   installRoot: string,
-  currentVersionDirName: string
+  currentVersionDirName: string,
 ): Promise<void> {
   const entries = await fs.readdir(installRoot, { withFileTypes: true });
   await Promise.all(
@@ -484,8 +621,13 @@ async function removeOutdatedInstalledVersions(
         (entry) =>
           entry.isDirectory() &&
           entry.name.startsWith(`${SERVER_NAME}-`) &&
-          entry.name !== currentVersionDirName
+          entry.name !== currentVersionDirName,
       )
-      .map((entry) => fs.rm(path.join(installRoot, entry.name), { recursive: true, force: true }))
+      .map((entry) =>
+        fs.rm(path.join(installRoot, entry.name), {
+          recursive: true,
+          force: true,
+        }),
+      ),
   );
 }

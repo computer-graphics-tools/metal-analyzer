@@ -2,15 +2,17 @@ use std::sync::Arc;
 
 use tower_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind, Position, Url};
 
-use crate::definition::DefinitionProvider;
-use crate::metal::builtins;
-use crate::symbols::SymbolProvider;
-use crate::syntax::SyntaxTree;
-use crate::syntax::helpers;
-
-use super::attribute::{try_attribute_hover, try_attribute_hover_from_tree};
-use super::builtins::make_hover_from_entry;
-use super::user_symbol::make_hover_from_user_symbol;
+use crate::{
+    definition::DefinitionProvider,
+    hover::{
+        attribute::{try_attribute_hover, try_attribute_hover_from_tree},
+        builtins::make_hover_from_entry,
+        user_symbol::make_hover_from_user_symbol,
+    },
+    metal::builtins,
+    symbols::SymbolProvider,
+    syntax::{SyntaxTree, helpers},
+};
 
 /// Provides hover information for Metal Shading Language symbols.
 pub struct HoverProvider {
@@ -92,7 +94,11 @@ impl HoverProvider {
     }
 
     /// Build hover from AST index data (per-file cache or project index).
-    fn hover_from_ast(&self, uri: &Url, word: &str) -> Option<Hover> {
+    fn hover_from_ast(
+        &self,
+        uri: &Url,
+        word: &str,
+    ) -> Option<Hover> {
         // Try per-file cached AST first.
         if let Some(index) = self.definition_provider.get_cached_index(uri) {
             if let Some(indices) = index.name_to_defs.get(word) {
@@ -124,7 +130,7 @@ fn format_symbol_hover(def: &crate::definition::SymbolDef) -> Option<Hover> {
     let snippet = match def.kind.as_str() {
         "FunctionDecl" | "CXXMethodDecl" => {
             format!("{} {}", qual_type_to_return_type(qual_type), def.name)
-        }
+        },
         "VarDecl" | "FieldDecl" => format!("{}: {}", def.name, qual_type),
         "ParmVarDecl" => format!("{}: {}", def.name, qual_type),
         "TypedefDecl" | "TypeAliasDecl" => format!("typedef {} = {}", def.name, qual_type),
@@ -134,10 +140,8 @@ fn format_symbol_hover(def: &crate::definition::SymbolDef) -> Option<Hover> {
 
     let mut md = format!("```metal\n{snippet}\n```\n");
 
-    let filename = std::path::Path::new(&def.file)
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_default();
+    let filename =
+        std::path::Path::new(&def.file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
     if !filename.is_empty() {
         md.push_str(&format!("\n*Defined in `{filename}:{}`*\n", def.line));
     }
@@ -156,8 +160,5 @@ fn format_symbol_hover(def: &crate::definition::SymbolDef) -> Option<Hover> {
 /// Clang reports function types as e.g. `"void (float *, uint)"`.
 /// This extracts the part before the first `(`.
 fn qual_type_to_return_type(qual_type: &str) -> &str {
-    qual_type
-        .find('(')
-        .map(|i| qual_type[..i].trim())
-        .unwrap_or(qual_type)
+    qual_type.find('(').map(|i| qual_type[..i].trim()).unwrap_or(qual_type)
 }

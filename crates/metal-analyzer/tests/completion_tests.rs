@@ -1,14 +1,18 @@
 use metal_analyzer::CompletionProvider;
 use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind, Position};
 
-fn has_label(items: &[CompletionItem], label: &str) -> bool {
+fn has_label(
+    items: &[CompletionItem],
+    label: &str,
+) -> bool {
     items.iter().any(|item| item.label == label)
 }
 
-fn has_insert_text(items: &[CompletionItem], insert_text: &str) -> bool {
-    items
-        .iter()
-        .any(|item| item.insert_text.as_deref() == Some(insert_text))
+fn has_insert_text(
+    items: &[CompletionItem],
+    insert_text: &str,
+) -> bool {
+    items.iter().any(|item| item.insert_text.as_deref() == Some(insert_text))
 }
 
 #[test]
@@ -24,10 +28,7 @@ fn include_context_returns_metal_headers() {
         None,
     );
 
-    assert!(
-        has_insert_text(&items, "<metal_stdlib>"),
-        "expected metal_stdlib include suggestion"
-    );
+    assert!(has_insert_text(&items, "<metal_stdlib>"), "expected metal_stdlib include suggestion");
 }
 
 #[test]
@@ -43,10 +44,7 @@ fn preprocessor_context_offers_directives() {
         None,
     );
 
-    assert!(
-        has_label(&items, "include"),
-        "expected preprocessor directive completion"
-    );
+    assert!(has_label(&items, "include"), "expected preprocessor directive completion");
 }
 
 #[test]
@@ -62,9 +60,7 @@ fn member_access_context_offers_swizzles() {
         None,
     );
 
-    let has_swizzle = items
-        .iter()
-        .any(|item| item.label == "xyz" && item.kind == Some(CompletionItemKind::FIELD));
+    let has_swizzle = items.iter().any(|item| item.label == "xyz" && item.kind == Some(CompletionItemKind::FIELD));
 
     assert!(has_swizzle, "expected vector swizzle completion");
 }

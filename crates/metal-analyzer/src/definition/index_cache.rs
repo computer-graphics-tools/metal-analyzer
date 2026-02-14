@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-use super::AstIndex;
+use crate::definition::AstIndex;
 
 const CACHE_SCHEMA_VERSION: u32 = 1;
 
@@ -16,33 +16,33 @@ struct CachedAstIndex {
     index: AstIndex,
 }
 
-pub(crate) async fn load(
+pub(crate) fn load(
     source_file: &Path,
     source_hash: &str,
     include_paths: &[String],
 ) -> Option<AstIndex> {
     let root = default_cache_dir();
-    load_from_root(&root, source_file, source_hash, include_paths).await
+    load_from_root(&root, source_file, source_hash, include_paths)
 }
 
-pub(crate) async fn save(
+pub(crate) fn save(
     source_file: &Path,
     source_hash: &str,
     include_paths: &[String],
     index: &AstIndex,
 ) {
     let root = default_cache_dir();
-    save_to_root(&root, source_file, source_hash, include_paths, index).await;
+    save_to_root(&root, source_file, source_hash, include_paths, index);
 }
 
-async fn load_from_root(
+fn load_from_root(
     root: &Path,
     source_file: &Path,
     source_hash: &str,
     include_paths: &[String],
 ) -> Option<AstIndex> {
     let cache_file = cache_file_path(root, source_file);
-    let content = tokio::fs::read_to_string(&cache_file).await.ok()?;
+    let content = std::fs::read_to_string(&cache_file).ok()?;
     let payload = serde_json::from_str::<CachedAstIndex>(&content).ok()?;
     let normalized_source_file = normalized_path_string(source_file);
     let include_hash = include_paths_hash(include_paths);
@@ -59,14 +59,14 @@ async fn load_from_root(
     Some(payload.index)
 }
 
-async fn save_to_root(
+fn save_to_root(
     root: &Path,
     source_file: &Path,
     source_hash: &str,
     include_paths: &[String],
     index: &AstIndex,
 ) {
-    if tokio::fs::create_dir_all(root).await.is_err() {
+    if std::fs::create_dir_all(root).is_err() {
         return;
     }
 
@@ -81,7 +81,7 @@ async fn save_to_root(
     let Ok(json) = serde_json::to_string(&payload) else {
         return;
     };
-    let _ = tokio::fs::write(cache_file, json).await;
+    let _ = std::fs::write(cache_file, json);
 }
 
 fn default_cache_dir() -> PathBuf {
@@ -91,7 +91,10 @@ fn default_cache_dir() -> PathBuf {
     std::env::temp_dir().join("metal-analyzer-index-cache")
 }
 
-fn cache_file_path(root: &Path, source_file: &Path) -> PathBuf {
+fn cache_file_path(
+    root: &Path,
+    source_file: &Path,
+) -> PathBuf {
     let key = stable_hash_hex(&normalized_path_string(source_file));
     root.join(format!("{key}.json"))
 }
@@ -102,7 +105,6 @@ fn include_paths_hash(include_paths: &[String]) -> String {
 }
 
 fn stable_hash_hex(input: &str) -> String {
-    // FNV-1a 64-bit
     let mut hash: u64 = 0xcbf29ce484222325;
     for byte in input.as_bytes() {
         hash ^= *byte as u64;
@@ -112,10 +114,7 @@ fn stable_hash_hex(input: &str) -> String {
 }
 
 fn normalized_path_string(path: &Path) -> String {
-    path.canonicalize()
-        .unwrap_or_else(|_| path.to_path_buf())
-        .display()
-        .to_string()
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf()).display().to_string()
 }
 
 #[cfg(test)]

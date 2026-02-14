@@ -1,7 +1,6 @@
-use metal_analyzer::HoverProvider;
-use metal_analyzer::DefinitionProvider;
-use metal_analyzer::symbols::SymbolProvider;
 use std::sync::Arc;
+
+use metal_analyzer::{DefinitionProvider, HoverProvider, symbols::SymbolProvider};
 use tower_lsp::lsp_types::{HoverContents, MarkedString, Position, Url};
 
 fn marked_string_text(ms: &MarkedString) -> String {
@@ -15,19 +14,12 @@ fn hover_text(hover: &HoverContents) -> String {
     match hover {
         HoverContents::Markup(markup) => markup.value.clone(),
         HoverContents::Scalar(s) => marked_string_text(s),
-        HoverContents::Array(items) => items
-            .iter()
-            .map(marked_string_text)
-            .collect::<Vec<_>>()
-            .join("\n"),
+        HoverContents::Array(items) => items.iter().map(marked_string_text).collect::<Vec<_>>().join("\n"),
     }
 }
 
 fn test_provider() -> HoverProvider {
-    HoverProvider::new(
-        Arc::new(SymbolProvider::new()),
-        Arc::new(DefinitionProvider::new()),
-    )
+    HoverProvider::new(Arc::new(SymbolProvider::new()), Arc::new(DefinitionProvider::new()))
 }
 
 fn test_uri() -> Url {

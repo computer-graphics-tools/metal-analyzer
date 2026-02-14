@@ -10,11 +10,7 @@ kernel void myKernel(device float* data [[buffer(0)]]) {
 "#;
     let provider = SymbolProvider::new();
     let symbols = provider.extract_symbols(src);
-    assert!(
-        symbols
-            .iter()
-            .any(|s| s.name == "myKernel" && s.kind == SymbolKind::FUNCTION)
-    );
+    assert!(symbols.iter().any(|s| s.name == "myKernel" && s.kind == SymbolKind::FUNCTION));
 }
 
 #[test]
@@ -22,11 +18,7 @@ fn extract_struct() {
     let src = "struct VertexOut { float4 position; };";
     let provider = SymbolProvider::new();
     let symbols = provider.extract_symbols(src);
-    assert!(
-        symbols
-            .iter()
-            .any(|s| s.name == "VertexOut" && s.kind == SymbolKind::STRUCT)
-    );
+    assert!(symbols.iter().any(|s| s.name == "VertexOut" && s.kind == SymbolKind::STRUCT));
 }
 
 #[test]
@@ -58,14 +50,8 @@ kernel void myKernel(
     assert!(names.contains(&"myKernel"), "should find myKernel, got: {names:?}");
 
     // Type names used in parameter declarations should NOT be extracted as symbols.
-    assert!(
-        !names.contains(&"Foo"),
-        "should NOT extract parameter type 'Foo' as a symbol, got: {names:?}"
-    );
-    assert!(
-        !names.contains(&"float"),
-        "should NOT extract 'float' as a symbol, got: {names:?}"
-    );
+    assert!(!names.contains(&"Foo"), "should NOT extract parameter type 'Foo' as a symbol, got: {names:?}");
+    assert!(!names.contains(&"float"), "should NOT extract 'float' as a symbol, got: {names:?}");
 }
 
 #[test]
@@ -80,12 +66,6 @@ float4 transform(float4 pos, float scale) {
     let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
 
     assert!(names.contains(&"transform"), "should find transform, got: {names:?}");
-    assert!(
-        !names.contains(&"pos"),
-        "should NOT extract parameter name 'pos' as a symbol, got: {names:?}"
-    );
-    assert!(
-        !names.contains(&"scale"),
-        "should NOT extract parameter name 'scale' as a symbol, got: {names:?}"
-    );
+    assert!(!names.contains(&"pos"), "should NOT extract parameter name 'pos' as a symbol, got: {names:?}");
+    assert!(!names.contains(&"scale"), "should NOT extract parameter name 'scale' as a symbol, got: {names:?}");
 }
