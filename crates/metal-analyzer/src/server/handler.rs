@@ -6,6 +6,7 @@ use tracing::{debug, info, warn};
 
 use crate::{
     ide::lsp::{ide_location_to_lsp, ide_range_to_lsp, navigation_target_to_lsp},
+    metal::compiler::MetalCompiler,
     progress::ProgressToken,
     semantic_tokens::get_legend,
     server::{
@@ -91,6 +92,24 @@ impl LanguageServer for MetalLanguageServer {
         _: InitializedParams,
     ) {
         info!("metal-analyzer initialized");
+
+        let client = self.client.clone();
+        tokio::spawn(async move {
+            let available = MetalCompiler::is_toolchain_available().await;
+            if !available {
+                warn!("Metal compiler toolchain/SDK unavailable — notifying client");
+                client
+                    .show_message(
+                        MessageType::ERROR,
+                        prefixed_client_message(
+                            "Metal compiler toolchain or SDK is unavailable. Diagnostics, indexing, and go-to-definition require both. \
+                             Try: xcode-select --install; sudo xcode-select -s /Applications/Xcode.app/Contents/Developer; \
+                             xcodebuild -downloadComponent MetalToolchain",
+                        ),
+                    )
+                    .await;
+            }
+        });
 
         let settings = self.settings_snapshot().await;
         let should_scan_workspace = settings.indexing.enable || settings.diagnostics.scope.is_workspace();

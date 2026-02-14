@@ -10,9 +10,88 @@ permissions:
   id-token: write
 
 jobs:
+  verify-release-versions:
+    name: Verify release version alignment
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify release tag matches workspace/editor versions
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python3 <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          root = Path(".")
+          expected_version = os.environ["RELEASE_TAG"]
+          if expected_version.startswith("v"):
+            expected_version = expected_version[1:]
+
+          def parse_workspace_version(cargo_toml_path: Path) -> str:
+            in_workspace_package = False
+            for line in cargo_toml_path.read_text().splitlines():
+              stripped = line.strip()
+              if stripped.startswith("[") and stripped.endswith("]"):
+                in_workspace_package = stripped == "[workspace.package]"
+                continue
+              if in_workspace_package and stripped.startswith("version"):
+                _, value = stripped.split("=", 1)
+                return value.strip().strip('"')
+            raise RuntimeError("Could not read [workspace.package].version from Cargo.toml")
+
+          def parse_zed_extension_version(extension_toml_path: Path) -> str:
+            for line in extension_toml_path.read_text().splitlines():
+              stripped = line.strip()
+              if stripped.startswith("["):
+                break
+              if stripped.startswith("version"):
+                _, value = stripped.split("=", 1)
+                return value.strip().strip('"')
+            raise RuntimeError("Could not read top-level version from editors/zed/extension.toml")
+
+          workspace_version = parse_workspace_version(root / "Cargo.toml")
+          vscode_version = json.loads((root / "editors/code/package.json").read_text())["version"]
+          zed_version = parse_zed_extension_version(root / "editors/zed/extension.toml")
+
+          gradle_props = {}
+          for line in (root / "editors/intellij/gradle.properties").read_text().splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+              continue
+            key, value = stripped.split("=", 1)
+            gradle_props[key.strip()] = value.strip()
+
+          intellij_version = gradle_props.get("pluginVersion")
+          if intellij_version is None:
+            print("editors/intellij/gradle.properties does not define pluginVersion")
+            sys.exit(1)
+
+          versions = {
+            "Cargo.toml [workspace.package.version]": workspace_version,
+            "editors/code/package.json [version]": vscode_version,
+            "editors/zed/extension.toml [version]": zed_version,
+            "editors/intellij/gradle.properties [pluginVersion]": intellij_version,
+          }
+
+          mismatches = {name: version for name, version in versions.items() if version != expected_version}
+          if mismatches:
+            print(f"Release tag expects version {expected_version}, but found mismatches:")
+            for name, version in mismatches.items():
+              print(f"  - {name}: {version}")
+            sys.exit(1)
+
+          print(f"Release tag {os.environ['RELEASE_TAG']} matches all distribution versions ({expected_version})")
+          PY
+
   build-binaries:
     name: Build ${{ matrix.target }}
     runs-on: macos-latest
+    needs: verify-release-versions
     strategy:
       fail-fast: false
       matrix:
@@ -92,6 +171,7 @@ jobs:
   publish-vscode-extension:
     name: Publish VS Code extension
     runs-on: ubuntu-latest
+    needs: verify-release-versions
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -135,6 +215,7 @@ jobs:
   publish-openvsx-extension:
     name: Publish OpenVSX extension
     runs-on: ubuntu-latest
+    needs: verify-release-versions
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -174,3 +255,34 @@ jobs:
         env:
           OPENVSX_TOKEN: ${{ secrets.OPENVSX_TOKEN }}
         run: bun x ovsx publish --pre-release -p "${OPENVSX_TOKEN}"
+
+  publish-intellij-plugin:
+    name: Publish IntelliJ Plugin
+    runs-on: ubuntu-latest
+    needs: verify-release-versions
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Verify release tag matches plugin version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          PLUGIN_VERSION="$(grep '^pluginVersion' editors/intellij/gradle.properties | cut -d= -f2 | tr -d ' ')"
+          TAG_VERSION="${RELEASE_TAG#v}"
+          if [ "${PLUGIN_VERSION}" != "${TAG_VERSION}" ]; then
+            echo "Release tag (${RELEASE_TAG}) does not match editors/intellij/gradle.properties version (${PLUGIN_VERSION})."
+            exit 1
+          fi
+
+      - name: Publish plugin to JetBrains Marketplace
+        working-directory: editors/intellij
+        env:
+          PUBLISH_TOKEN: ${{ secrets.JETBRAINS_MARKETPLACE_TOKEN }}
+        run: ./gradlew publishPlugin

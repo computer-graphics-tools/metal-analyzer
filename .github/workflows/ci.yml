@@ -7,9 +7,82 @@ on:
       - main
 
 jobs:
+  version-consistency:
+    name: Verify Version Consistency
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify workspace/editor versions match
+        run: |
+          python3 <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          root = Path(".")
+
+          def parse_workspace_version(cargo_toml_path: Path) -> str:
+            in_workspace_package = False
+            for line in cargo_toml_path.read_text().splitlines():
+              stripped = line.strip()
+              if stripped.startswith("[") and stripped.endswith("]"):
+                in_workspace_package = stripped == "[workspace.package]"
+                continue
+              if in_workspace_package and stripped.startswith("version"):
+                _, value = stripped.split("=", 1)
+                return value.strip().strip('"')
+            raise RuntimeError("Could not read [workspace.package].version from Cargo.toml")
+
+          def parse_zed_extension_version(extension_toml_path: Path) -> str:
+            for line in extension_toml_path.read_text().splitlines():
+              stripped = line.strip()
+              if stripped.startswith("["):
+                break
+              if stripped.startswith("version"):
+                _, value = stripped.split("=", 1)
+                return value.strip().strip('"')
+            raise RuntimeError("Could not read top-level version from editors/zed/extension.toml")
+
+          workspace_version = parse_workspace_version(root / "Cargo.toml")
+          vscode_version = json.loads((root / "editors/code/package.json").read_text())["version"]
+          zed_version = parse_zed_extension_version(root / "editors/zed/extension.toml")
+
+          gradle_props = {}
+          for line in (root / "editors/intellij/gradle.properties").read_text().splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+              continue
+            key, value = stripped.split("=", 1)
+            gradle_props[key.strip()] = value.strip()
+
+          intellij_version = gradle_props.get("pluginVersion")
+          if intellij_version is None:
+            print("editors/intellij/gradle.properties does not define pluginVersion")
+            sys.exit(1)
+
+          versions = {
+            "Cargo.toml [workspace.package.version]": workspace_version,
+            "editors/code/package.json [version]": vscode_version,
+            "editors/zed/extension.toml [version]": zed_version,
+            "editors/intellij/gradle.properties [pluginVersion]": intellij_version,
+          }
+
+          mismatches = {name: version for name, version in versions.items() if version != workspace_version}
+          if mismatches:
+            print(f"Version mismatch: expected {workspace_version}")
+            for name, version in mismatches.items():
+              print(f"  - {name}: {version}")
+            sys.exit(1)
+
+          print(f"All distribution versions are aligned at {workspace_version}")
+          PY
+
   test-and-build:
     name: Test Workspace
     runs-on: ubuntu-latest
+    needs: version-consistency
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,3 +100,21 @@ jobs:
 
       - name: Build Zed extension
         run: cargo build -p zed_metal --target wasm32-wasip2 --release
+
+  build-intellij:
+    name: Build IntelliJ Plugin
+    runs-on: ubuntu-latest
+    needs: version-consistency
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Build plugin
+        working-directory: editors/intellij
+        run: ./gradlew buildPlugin

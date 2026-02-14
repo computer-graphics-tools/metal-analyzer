@@ -467,6 +467,21 @@ impl MetalCompiler {
         }
     }
 
+    /// Returns `true` if the Metal compiler binary, macOS SDK, and an actual
+    /// `xcrun metal` probe invocation are all healthy.
+    pub async fn is_toolchain_available() -> bool {
+        let toolchain_signature = Self::detect_toolchain_signature().await;
+        if toolchain_signature.is_none() {
+            return false;
+        }
+
+        if Self::detect_macos_sdk_path().await.is_none() {
+            return false;
+        }
+
+        Self::probe_compiler_execution().await
+    }
+
     async fn detect_toolchain_signature() -> Option<String> {
         let mut command = xcrun_command();
         let output = command.args(["--find", "metal"]).output().await.ok()?;
@@ -479,6 +494,26 @@ impl MetalCompiler {
         }
         let path = PathBuf::from(raw_path);
         Some(path.canonicalize().unwrap_or(path).display().to_string())
+    }
+
+    async fn detect_macos_sdk_path() -> Option<String> {
+        let mut command = xcrun_command();
+        let output = command.args(["--sdk", "macosx", "--show-sdk-path"]).output().await.ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let raw_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if raw_path.is_empty() {
+            return None;
+        }
+        let path = PathBuf::from(raw_path);
+        Some(path.canonicalize().unwrap_or(path).display().to_string())
+    }
+
+    async fn probe_compiler_execution() -> bool {
+        let mut command = xcrun_command();
+        command.args(["metal", "-v", "-E", "-"]).stdin(std::process::Stdio::null());
+        command.output().await.map(|output| output.status.success()).unwrap_or(false)
     }
 
     /// Register additional compiler flags (e.g. `-std=metal4.0`, `-DFOO=1`).
@@ -659,8 +694,7 @@ impl MetalCompiler {
 
     /// Check whether the Metal compiler toolchain is available on this system.
     pub async fn is_available() -> bool {
-        let mut command = xcrun_command();
-        command.args(["--find", "metal"]).output().await.map(|o| o.status.success()).unwrap_or(false)
+        Self::is_toolchain_available().await
     }
 
     // ── Private helpers ──────────────────────────────────────────────────

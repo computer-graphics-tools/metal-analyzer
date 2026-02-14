@@ -875,7 +875,7 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
 name = "metal-analyzer"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "clang-ast",
  "clap",
@@ -2070,7 +2070,7 @@ dependencies = [
 
 [[package]]
 name = "zed_metal"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "zed_extension_api",
 ]

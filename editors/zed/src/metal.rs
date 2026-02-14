@@ -27,6 +27,14 @@ impl MetalExtension {
         if let Some(path) = lsp_settings
             .as_ref()
             .and_then(|s| s.initialization_options.as_ref())
+            .and_then(|v| v.get("metal-analyzer")?.get("serverPath")?.as_str().map(String::from))
+        {
+            return Ok(path);
+        }
+
+        if let Some(path) = lsp_settings
+            .as_ref()
+            .and_then(|s| s.initialization_options.as_ref())
             .and_then(|v| v.get("metal-analyzer")?.get("binary")?.get("path")?.as_str().map(String::from))
         {
             return Ok(path);
