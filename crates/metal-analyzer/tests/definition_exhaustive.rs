@@ -101,7 +101,7 @@ fn validate_file(
             character: *col,
         };
 
-        let result = provider.provide(&uri, position, &source, include_paths, &snapshot);
+        let result = provider.provide(&uri, position, &source, include_paths, &snapshot, || false);
 
         match result {
             None => {

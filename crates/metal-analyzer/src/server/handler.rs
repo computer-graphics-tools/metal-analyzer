@@ -1,5 +1,6 @@
-use std::{sync::atomic::Ordering, time::Duration};
+use std::{panic::AssertUnwindSafe, sync::atomic::Ordering, time::Duration};
 
+use futures::FutureExt;
 use tower_lsp::{LanguageServer, jsonrpc::Result, lsp_types::*};
 use tracing::{debug, info, warn};
 
@@ -166,7 +167,11 @@ impl LanguageServer for MetalLanguageServer {
 
         info!("Opened {filename} (v{version}, {} bytes)", text.len());
         if allow_client_info_logs {
-            self.client.log_message(MessageType::INFO, prefixed_client_message(format!("Opened {filename}"))).await;
+            let _ = AssertUnwindSafe(
+                self.client.log_message(MessageType::INFO, prefixed_client_message(format!("Opened {filename}"))),
+            )
+            .catch_unwind()
+            .await;
         }
 
         // Lightweight synchronous work only.
@@ -235,7 +240,13 @@ impl LanguageServer for MetalLanguageServer {
 
                     let still_latest = diagnostics_generation.get(&uri).is_some_and(|current| *current == generation);
                     if still_latest {
-                        client.publish_diagnostics(uri.clone(), diagnostics, Some(version)).await;
+                        let result =
+                            AssertUnwindSafe(client.publish_diagnostics(uri.clone(), diagnostics, Some(version)))
+                                .catch_unwind()
+                                .await;
+                        if result.is_err() {
+                            warn!("publish_diagnostics panicked (client may have disconnected)");
+                        }
                     }
                 }
             }
@@ -244,8 +255,12 @@ impl LanguageServer for MetalLanguageServer {
             if indexing_enabled {
                 provider.index_document(&uri, &text, &includes);
                 if allow_client_info_logs {
-                    client
-                        .log_message(MessageType::INFO, prefixed_client_message(format!("Indexed AST for {fname}")))
+                    let _ =
+                        AssertUnwindSafe(client.log_message(
+                            MessageType::INFO,
+                            prefixed_client_message(format!("Indexed AST for {fname}")),
+                        ))
+                        .catch_unwind()
                         .await;
                 }
             }
@@ -359,7 +374,12 @@ impl LanguageServer for MetalLanguageServer {
                 // Re-check staleness after compilation.
                 let still_latest = diag_gen_map.get(&uri).is_some_and(|current| *current == diag_generation);
                 if still_latest {
-                    client.publish_diagnostics(uri, diagnostics, Some(version)).await;
+                    let result = AssertUnwindSafe(client.publish_diagnostics(uri, diagnostics, Some(version)))
+                        .catch_unwind()
+                        .await;
+                    if result.is_err() {
+                        warn!("publish_diagnostics panicked (client may have disconnected)");
+                    }
                 }
             }
         });
@@ -400,7 +420,11 @@ impl LanguageServer for MetalLanguageServer {
                     }
                 }
                 if allow_client_info_logs {
-                    client.log_message(MessageType::INFO, prefixed_client_message(format!("Re-indexed {fname}"))).await;
+                    let _ = AssertUnwindSafe(
+                        client.log_message(MessageType::INFO, prefixed_client_message(format!("Re-indexed {fname}"))),
+                    )
+                    .catch_unwind()
+                    .await;
                 }
             });
         }
@@ -514,13 +538,23 @@ impl LanguageServer for MetalLanguageServer {
         };
         let tree = self.document_trees.get(&uri).unwrap_or_else(|| SyntaxTree::parse(&text));
 
+        let generation = self.goto_def_generation.fetch_add(1, Ordering::Relaxed) + 1;
+        let gen_ref = self.goto_def_generation.clone();
+        let is_cancelled = move || gen_ref.load(Ordering::Relaxed) != generation;
+
         let progress = ProgressToken::begin(&self.client, "Definition", Some("Finding definition…".to_string())).await;
         let include_start = std::time::Instant::now();
         let includes = self.include_paths(&uri).await;
         let include_elapsed = include_start.elapsed();
 
+        if is_cancelled() {
+            debug!("goto-def cancelled before provide");
+            progress.end(Some("Cancelled".to_string())).await;
+            return Ok(None);
+        }
+
         let start = std::time::Instant::now();
-        let nav_result = self.definition_provider.provide(&uri, position, &text, &includes, &tree);
+        let nav_result = self.definition_provider.provide(&uri, position, &text, &includes, &tree, &is_cancelled);
         let elapsed = start.elapsed();
 
         let filename = short_name(&uri);

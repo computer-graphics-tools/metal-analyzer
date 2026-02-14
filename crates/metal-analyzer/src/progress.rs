@@ -56,26 +56,31 @@ impl ProgressToken {
         let token = NumberOrString::String(format!("metalAnalyzer/{title}/{id}"));
         let display_title = prefixed_progress_title(title);
 
-        let create_result =
-            AssertUnwindSafe(client.send_request::<request::WorkDoneProgressCreate>(WorkDoneProgressCreateParams {
-                token: token.clone(),
-            }))
+        // Send workDoneProgress/create as a background task so that:
+        // 1. We don't block if the editor is slow to respond.
+        // 2. The oneshot receiver stays alive until the response arrives,
+        //    avoiding a panic in tower-lsp's Pending::insert when the
+        //    receiver is dropped before the response.
+        let create_client = client.clone();
+        let create_token = token.clone();
+        tokio::spawn(async move {
+            let result = AssertUnwindSafe(create_client.send_request::<request::WorkDoneProgressCreate>(
+                WorkDoneProgressCreateParams {
+                    token: create_token,
+                },
+            ))
             .catch_unwind()
             .await;
-
-        match create_result {
-            Ok(Err(error)) => {
-                debug!("workDoneProgress/create failed (editor may not support it): {error}");
-            },
-            Err(_) => {
-                warn!("workDoneProgress/create panicked (client may have disconnected)");
-                return Self {
-                    client: None,
-                    token: None,
-                };
-            },
-            Ok(Ok(())) => {},
-        }
+            match result {
+                Ok(Ok(())) => {},
+                Ok(Err(error)) => {
+                    debug!("workDoneProgress/create failed (editor may not support it): {error}");
+                },
+                Err(_) => {
+                    warn!("workDoneProgress/create panicked (client may have disconnected)");
+                },
+            }
+        });
 
         let send_ok = AssertUnwindSafe(client.send_notification::<notification::Progress>(ProgressParams {
             token: token.clone(),

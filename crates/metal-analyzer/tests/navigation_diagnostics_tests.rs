@@ -54,7 +54,7 @@ fn goto_def_include_resolves_generated_header() {
 
     let position = position_of(&source, "../../../generated/matmul.h");
     let result = provider
-        .provide(&uri, position, &source, &include_paths, &snapshot)
+        .provide(&uri, position, &source, &include_paths, &snapshot, || false)
         .expect("expected include go-to-definition result");
     let target = first_location(result);
 
@@ -79,7 +79,7 @@ fn goto_def_prefers_qualified_fixture_transform() {
 
     let position = position_of(&source, "../../common/transforms.h");
     let result = provider
-        .provide(&uri, position, &source, &include_paths, &snapshot)
+        .provide(&uri, position, &source, &include_paths, &snapshot, || false)
         .expect("expected include resolution for fixture transforms header");
     let target = first_location(result);
 
@@ -104,7 +104,7 @@ fn goto_def_prefers_qualified_steel_transform() {
 
     let position = position_of(&source, "../../common/steel/gemm/transforms.h");
     let result = provider
-        .provide(&uri, position, &source, &include_paths, &snapshot)
+        .provide(&uri, position, &source, &include_paths, &snapshot, || false)
         .expect("expected include resolution for steel transforms header");
     let target = first_location(result);
 
@@ -129,7 +129,7 @@ fn goto_def_prefers_qualified_fixture_loader() {
 
     let position = position_of(&source, "../../common/loader.h");
     let result = provider
-        .provide(&uri, position, &source, &include_paths, &snapshot)
+        .provide(&uri, position, &source, &include_paths, &snapshot, || false)
         .expect("expected include resolution for fixture loader header");
     let target = first_location(result);
 
@@ -155,7 +155,7 @@ fn goto_def_prefers_qualified_steel_loader() {
 
     let position = position_of(&source, "../../common/steel/gemm/loader.h");
     let result = provider
-        .provide(&uri, position, &source, &include_paths, &snapshot)
+        .provide(&uri, position, &source, &include_paths, &snapshot, || false)
         .expect("expected include resolution for steel loader header");
     let target = first_location(result);
 
@@ -181,7 +181,7 @@ fn goto_def_unqualified_loader_resolves_local_header() {
 
     let position = position_of(&source, "\"loader.h\"");
     let result = provider
-        .provide(&uri, position, &source, &include_paths, &snapshot)
+        .provide(&uri, position, &source, &include_paths, &snapshot, || false)
         .expect("expected include resolution for unqualified loader.h");
     let target = first_location(result);
 
@@ -206,7 +206,7 @@ fn goto_def_overloaded_symbol_resolves_function_definition() {
 
     let position = position_of(&source, "local_template(sum.re)");
     let result = provider
-        .provide(&uri, position, &source, &include_paths, &snapshot)
+        .provide(&uri, position, &source, &include_paths, &snapshot, || false)
         .expect("expected definition for local_template call");
     let target = first_location(result);
 
@@ -235,7 +235,7 @@ struct Kernel {
 
     let position = position_of(&source, "BN > 1 ? BN * (BM + TM) : 0");
     let result = provider
-        .provide(&uri, position, &source, &include_paths, &snapshot)
+        .provide(&uri, position, &source, &include_paths, &snapshot, || false)
         .expect("expected definition for template parameter BN");
     let target = first_location(result);
 

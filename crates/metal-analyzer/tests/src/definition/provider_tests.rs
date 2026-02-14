@@ -678,7 +678,7 @@ kernel void k(device float* sinks [[buffer(0)]], uint tid [[thread_position_in_g
 
     for symbol in ["threadgroup_barrier", "mem_flags", "mem_threadgroup"] {
         let position = position_of(source, symbol);
-        let result = provider.provide(&uri, position, source, &include_paths, &snapshot);
+        let result = provider.provide(&uri, position, source, &include_paths, &snapshot, || false);
 
         let Some(NavigationTarget::Single(location)) = result else {
             panic!("expected goto-definition target for builtin symbol: {symbol}");
@@ -705,7 +705,7 @@ kernel void k(device float* sinks [[buffer(0)]], uint tid [[thread_position_in_g
     let source = source.to_owned();
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let result = provider.provide(&uri, position, source.as_str(), &Vec::new(), &snapshot);
+        let result = provider.provide(&uri, position, source.as_str(), &Vec::new(), &snapshot, || false);
         let _ = tx.send(result);
     });
 
@@ -731,7 +731,7 @@ kernel void k(device float* sinks [[buffer(0)]], uint tid [[thread_position_in_g
     let provider = DefinitionProvider::new();
     let before = super::super::compiler::ast_dump_counter();
 
-    let result = provider.provide(&uri, position, source, &Vec::new(), &snapshot);
+    let result = provider.provide(&uri, position, source, &Vec::new(), &snapshot, || false);
 
     let after = super::super::compiler::ast_dump_counter();
     assert!(result.is_none(), "goto-definition on `if` should return no symbol location");
@@ -774,7 +774,7 @@ fn concurrent_goto_definition_for_same_file_runs_single_ast_dump() {
         let barrier = Arc::clone(&barrier);
         handles.push(std::thread::spawn(move || {
             barrier.wait();
-            provider.provide(&uri, cursor, source.as_str(), include_paths.as_slice(), snapshot.as_ref())
+            provider.provide(&uri, cursor, source.as_str(), include_paths.as_slice(), snapshot.as_ref(), || false)
         }));
     }
 
@@ -834,7 +834,7 @@ fn concurrent_index_document_and_provide_share_single_ast_dump() {
         let barrier = Arc::clone(&barrier);
         std::thread::spawn(move || {
             barrier.wait();
-            provider.provide(&uri, cursor, source.as_str(), include_paths.as_slice(), snapshot.as_ref())
+            provider.provide(&uri, cursor, source.as_str(), include_paths.as_slice(), snapshot.as_ref(), || false)
         })
     };
 

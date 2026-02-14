@@ -1,8 +1,11 @@
 use std::{
     collections::{BTreeSet, HashSet},
+    panic::AssertUnwindSafe,
     path::{Component, Path, PathBuf},
     sync::atomic::Ordering,
 };
+
+use futures::FutureExt;
 
 use dashmap::DashMap;
 use tower_lsp::lsp_types::{
@@ -73,7 +76,12 @@ impl MetalLanguageServer {
 
         self.diagnostics_cache.insert(uri.clone(), diagnostics.clone());
 
-        self.client.publish_diagnostics(uri.clone(), diagnostics, Some(version)).await;
+        let result = AssertUnwindSafe(self.client.publish_diagnostics(uri.clone(), diagnostics, Some(version)))
+            .catch_unwind()
+            .await;
+        if result.is_err() {
+            warn!("publish_diagnostics panicked (client may have disconnected)");
+        }
 
         let end_msg = match count {
             0 => "No issues found".to_owned(),
@@ -113,7 +121,11 @@ impl MetalLanguageServer {
     ) {
         self.diagnostics_cache.remove(uri);
         self.diagnostics_generation.remove(uri);
-        self.client.publish_diagnostics(uri.clone(), Vec::new(), None).await;
+        let result =
+            AssertUnwindSafe(self.client.publish_diagnostics(uri.clone(), Vec::new(), None)).catch_unwind().await;
+        if result.is_err() {
+            warn!("publish_diagnostics panicked (client may have disconnected)");
+        }
     }
 
     /// Create a lightweight handle suitable for passing into `tokio::spawn`.
@@ -129,6 +141,7 @@ impl MetalLanguageServer {
             header_owners: self.header_owners.clone(),
             owner_headers: self.owner_headers.clone(),
             include_paths_cache: self.include_paths_cache.clone(),
+            diagnostics_generation: self.diagnostics_generation.clone(),
             workspace_generation: self.workspace_generation.load(Ordering::Relaxed),
             settings: self.settings.clone(),
         }
@@ -147,6 +160,7 @@ pub(crate) struct BackgroundHandle {
     header_owners: std::sync::Arc<DashMap<PathBuf, std::collections::BTreeSet<PathBuf>>>,
     owner_headers: std::sync::Arc<DashMap<PathBuf, std::collections::BTreeSet<PathBuf>>>,
     include_paths_cache: std::sync::Arc<DashMap<PathBuf, (u64, Vec<String>)>>,
+    diagnostics_generation: std::sync::Arc<DashMap<Url, u64>>,
     workspace_generation: u64,
     settings: std::sync::Arc<tokio::sync::RwLock<ServerSettings>>,
 }
@@ -262,6 +276,7 @@ impl BackgroundHandle {
             let include_paths_cache = self.include_paths_cache.clone();
             let workspace_generation = self.workspace_generation;
             let open_documents = self.document_store.clone();
+            let diagnostics_generation = self.diagnostics_generation.clone();
             let client = self.client.clone();
             let count = processed.clone();
 
@@ -276,6 +291,7 @@ impl BackgroundHandle {
                     &include_paths_cache,
                     workspace_generation,
                     &open_documents,
+                    &diagnostics_generation,
                     path,
                 )
                 .await;
@@ -378,6 +394,7 @@ async fn publish_workspace_diagnostics_for_file(
     include_paths_cache: &DashMap<PathBuf, (u64, Vec<String>)>,
     workspace_generation: u64,
     open_documents: &crate::document::DocumentStore,
+    diagnostics_generation: &DashMap<Url, u64>,
     path: PathBuf,
 ) -> WorkspaceDiagnosticsFileResult {
     let Some(uri) = Url::from_file_path(&path).ok() else {
@@ -389,7 +406,10 @@ async fn publish_workspace_diagnostics_for_file(
         };
     };
 
-    if open_documents.get(&uri).is_some() {
+    // Only skip open files if didOpen/didChange already claimed them
+    // (i.e. a diagnostics generation entry exists). Otherwise the file
+    // was opened but never got diagnostics — we should still analyze it.
+    if open_documents.get(&uri).is_some() && diagnostics_generation.get(&uri).is_some() {
         return WorkspaceDiagnosticsFileResult {
             path,
             published: false,
@@ -398,13 +418,21 @@ async fn publish_workspace_diagnostics_for_file(
         };
     }
 
-    let Ok(source) = tokio::fs::read_to_string(&path).await else {
-        return WorkspaceDiagnosticsFileResult {
-            path,
-            published: false,
-            skipped_open_document: false,
-            diagnostic_count: 0,
-        };
+    // Prefer in-memory content for open files, fall back to disk.
+    let source = if let Some(text) = open_documents.get_content(&uri) {
+        text
+    } else {
+        match tokio::fs::read_to_string(&path).await {
+            Ok(s) => s,
+            Err(_) => {
+                return WorkspaceDiagnosticsFileResult {
+                    path,
+                    published: false,
+                    skipped_open_document: false,
+                    diagnostic_count: 0,
+                };
+            },
+        }
     };
 
     let diagnostics = compile_filtered_diagnostics_for_document(
@@ -420,10 +448,13 @@ async fn publish_workspace_diagnostics_for_file(
     .await;
     let diagnostic_count = diagnostics.len();
 
-    client.publish_diagnostics(uri, diagnostics, None).await;
+    let result = AssertUnwindSafe(client.publish_diagnostics(uri, diagnostics, None)).catch_unwind().await;
+    if result.is_err() {
+        warn!("publish_diagnostics panicked (client may have disconnected)");
+    }
     WorkspaceDiagnosticsFileResult {
         path,
-        published: true,
+        published: result.is_ok(),
         skipped_open_document: false,
         diagnostic_count,
     }

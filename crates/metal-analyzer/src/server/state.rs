@@ -64,6 +64,12 @@ pub struct MetalLanguageServer {
     /// Forward include graph: owner `.metal` file -> included header files.
     pub(crate) owner_headers: Arc<DashMap<PathBuf, BTreeSet<PathBuf>>>,
 
+    /// Monotonic generation for goto-definition requests.
+    ///
+    /// Bumped on every new request so in-flight AST dumps for stale requests
+    /// can be abandoned early instead of blocking newer jumps.
+    pub(crate) goto_def_generation: Arc<AtomicU64>,
+
     /// Debounce generation counter for background AST indexing on edits.
     ///
     /// We bump the counter on every `did_change` and only run the expensive
@@ -107,6 +113,7 @@ impl MetalLanguageServer {
         let owner_headers = Arc::new(DashMap::new());
         let ast_index_generation = Arc::new(DashMap::new());
         let include_paths_cache = Arc::new(DashMap::new());
+        let goto_def_generation = Arc::new(AtomicU64::new(0));
         let workspace_generation = Arc::new(AtomicU64::new(0));
         let settings = Arc::new(RwLock::new(ServerSettings::default()));
 
@@ -125,6 +132,7 @@ impl MetalLanguageServer {
             diagnostics_generation,
             header_owners,
             owner_headers,
+            goto_def_generation,
             ast_index_generation,
             include_paths_cache,
             workspace_generation,

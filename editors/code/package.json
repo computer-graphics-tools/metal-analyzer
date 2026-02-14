@@ -24,22 +24,11 @@
   ],
   "icon": "icon.png",
   "activationEvents": [
-    "onLanguage:metal"
+    "onLanguage:metal",
+    "workspaceContains:**/*.metal",
+    "onStartupFinished"
   ],
   "main": "./out/extension.js",
-  "files": [
-    "LICENSE",
-    "README.md",
-    "language-configuration.json",
-    "out/**",
-    "node_modules/vscode-languageclient/**",
-    "node_modules/balanced-match/**",
-    "node_modules/semver/**",
-    "node_modules/vscode-languageserver-protocol/**",
-    "node_modules/vscode-jsonrpc/**",
-    "node_modules/vscode-languageserver-types/**",
-    "syntaxes/**"
-  ],
   "contributes": {
     "commands": [
       {
@@ -96,7 +85,6 @@
           "default": "metal-analyzer",
           "markdownDescription": "Path to the metal-analyzer binary. The default value uses PATH first, then auto-downloads the latest macOS release binary."
         },
-        "$generated-start": true,
         "metal-analyzer.formatting.enable": {
           "markdownDescription": "Enable LSP-backed document formatting.",
           "default": true,
@@ -235,8 +223,7 @@
           "type": "number",
           "minimum": 1,
           "maximum": 8
-        },
-        "$generated-end": true
+        }
       }
     }
   },

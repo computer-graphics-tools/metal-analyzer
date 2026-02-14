@@ -103,7 +103,7 @@ impl DefinitionProvider {
             Ok(u) => u,
             Err(_) => return false,
         };
-        self.load_or_build_index(&uri, &source, include_paths).is_some()
+        self.load_or_build_index(&uri, &source, include_paths, &|| false).is_some()
     }
 
     pub fn index_document(
@@ -112,7 +112,7 @@ impl DefinitionProvider {
         source: &str,
         include_paths: &[String],
     ) {
-        if let Some((_, load_source)) = self.load_or_build_index(uri, source, include_paths) {
+        if let Some((_, load_source)) = self.load_or_build_index(uri, source, include_paths, &|| false) {
             match load_source {
                 IndexLoadSource::Memory => {
                     debug!("Pre-indexing AST memory hit for {uri}");
@@ -151,10 +151,12 @@ impl DefinitionProvider {
         source: &str,
         include_paths: &[String],
         snapshot: &SyntaxTree,
+        is_cancelled: impl Fn() -> bool,
     ) -> Option<NavigationTarget> {
         let started = std::time::Instant::now();
         let mut index_source: Option<&'static str> = None;
-        let result = self.provide_inner(uri, position, source, include_paths, snapshot, &mut index_source);
+        let result =
+            self.provide_inner(uri, position, source, include_paths, snapshot, &mut index_source, &is_cancelled);
         self.goto_def_perf.record(started.elapsed(), index_source, result.is_some());
         result
     }
@@ -167,6 +169,7 @@ impl DefinitionProvider {
         include_paths: &[String],
         snapshot: &SyntaxTree,
         index_source: &mut Option<&'static str>,
+        is_cancelled: &dyn Fn() -> bool,
     ) -> Option<NavigationTarget> {
         let (include_info, word) = {
             let root = snapshot.root();
@@ -233,7 +236,7 @@ impl DefinitionProvider {
         }
 
         // TIER-4: AST-based resolution (scope-aware via Clang)
-        if let Some((index, load_source)) = self.load_or_build_index(uri, source, include_paths) {
+        if let Some((index, load_source)) = self.load_or_build_index(uri, source, include_paths, is_cancelled) {
             *index_source = Some(load_source.as_str());
             debug!("[goto-def] AST index source: {}", load_source.as_str());
 
@@ -304,12 +307,12 @@ impl DefinitionProvider {
             return None;
         }
 
-        let (index, load_source) = self.load_or_build_index(uri, source, include_paths)?;
+        let (index, load_source) = self.load_or_build_index(uri, source, include_paths, &|| false)?;
         debug!("[goto-declaration] AST index source: {}", load_source.as_str());
 
         let declarations = index.get_declarations(&word);
         if declarations.is_empty() {
-            return self.provide(uri, position, source, include_paths, snapshot);
+            return self.provide(uri, position, source, include_paths, snapshot, || false);
         }
 
         let locations: Vec<IdeLocation> = declarations.iter().filter_map(|d| def_to_location(d)).collect();
@@ -337,7 +340,7 @@ impl DefinitionProvider {
             return None;
         }
 
-        let (index, load_source) = self.load_or_build_index(uri, source, include_paths)?;
+        let (index, load_source) = self.load_or_build_index(uri, source, include_paths, &|| false)?;
         debug!("[goto-type-definition] AST index source: {}", load_source.as_str());
 
         let source_file = uri.to_file_path().ok().map(|p| p.display().to_string()).unwrap_or_default();
@@ -382,7 +385,7 @@ impl DefinitionProvider {
             return None;
         }
 
-        let (index, load_source) = self.load_or_build_index(uri, source, include_paths)?;
+        let (index, load_source) = self.load_or_build_index(uri, source, include_paths, &|| false)?;
         debug!("[goto-implementation] AST index source: {}", load_source.as_str());
 
         let source_file = uri.to_file_path().ok().map(|p| p.display().to_string()).unwrap_or_default();
@@ -444,7 +447,7 @@ impl DefinitionProvider {
             return None;
         }
 
-        let (index, load_source) = self.load_or_build_index(uri, source, include_paths)?;
+        let (index, load_source) = self.load_or_build_index(uri, source, include_paths, &|| false)?;
         debug!("[references] AST index source: {}", load_source.as_str());
 
         let source_file = uri.to_file_path().ok().map(|p| p.display().to_string()).unwrap_or_default();
@@ -565,6 +568,7 @@ impl DefinitionProvider {
         uri: &Url,
         source: &str,
         include_paths: &[String],
+        is_cancelled: &dyn Fn() -> bool,
     ) -> Option<(Arc<AstIndex>, IndexLoadSource)> {
         let file_id = FileId::from_url(uri);
         let source_path = uri.to_file_path().ok();
@@ -579,6 +583,12 @@ impl DefinitionProvider {
 
         let build_lock = self.build_lock(&file_id);
         let _build_guard = build_lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        // A newer goto-definition request arrived while we waited for the lock.
+        if is_cancelled() {
+            debug!("[goto-def] cancelled while waiting for build lock");
+            return None;
+        }
 
         if let Some(entry) = self.cache.get(&file_id).filter(|e| e.0 == hash) {
             debug!(
@@ -597,6 +607,12 @@ impl DefinitionProvider {
             let idx = Arc::new(index);
             self.cache.insert(file_id.clone(), (hash, Arc::clone(&idx)));
             return Some((idx, IndexLoadSource::Disk));
+        }
+
+        // Check cancellation before the expensive AST dump.
+        if is_cancelled() {
+            debug!("[goto-def] cancelled before AST dump");
+            return None;
         }
 
         debug!("[goto-def] AST cache miss, running AST dump for {uri}");

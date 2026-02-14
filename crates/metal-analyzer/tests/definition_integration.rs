@@ -61,7 +61,7 @@ fn goto_def_function_in_same_file() {
         character: 18,
     };
 
-    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot);
+    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot, || false);
 
     let loc = extract_location(result.expect("expected a definition for 'transform'"));
     assert_eq!(
@@ -95,7 +95,7 @@ fn goto_def_struct_in_included_file() {
         character: 11,
     };
 
-    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot);
+    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot, || false);
 
     let loc = extract_location(result.expect("expected a definition for 'MyStruct'"));
     assert!(
@@ -127,7 +127,7 @@ fn goto_def_struct_cross_file_via_include() {
         character: 19,
     };
 
-    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot);
+    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot, || false);
 
     let loc = extract_location(result.expect("expected a definition for 'MyParams'"));
     assert!(
@@ -160,7 +160,7 @@ fn goto_def_struct_cross_file_when_cursor_on_pointer_star() {
         character: 27,
     };
 
-    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot);
+    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot, || false);
 
     let loc = extract_location(result.expect("expected a definition for 'MyParams'"));
     assert!(
@@ -190,7 +190,7 @@ fn goto_def_missing_type_returns_none() {
         character: 19,
     };
 
-    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot);
+    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot, || false);
 
     assert!(result.is_none(), "should return None for a type from a missing header, got: {result:?}");
 }
@@ -217,7 +217,7 @@ fn goto_def_partial_ast_valid_symbol_resolves() {
         character: 11,
     };
 
-    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot);
+    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot, || false);
 
     // This may or may not work depending on whether the partial AST
     // contains the included types. If it does, verify correctness.
@@ -251,7 +251,7 @@ fn goto_def_symbol_in_macro_invocation() {
         character: 22,
     };
 
-    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot);
+    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot, || false);
 
     let loc = extract_location(result.expect("expected definition for 'my_min'"));
     assert_eq!(
@@ -281,7 +281,7 @@ fn goto_def_ambiguous_name_fallback_returns_none() {
         character: 7,
     };
 
-    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot);
+    let result = provider.provide(&uri, position, &source, &include_paths(), &snapshot, || false);
 
     assert!(result.is_none(), "ambiguous fallback should return None, got: {result:?}");
 }
