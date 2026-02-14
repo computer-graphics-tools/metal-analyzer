@@ -1,7 +1,6 @@
 use std::{hint::black_box, path::PathBuf, sync::Arc};
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use futures::future::join_all;
 use metal_analyzer::{DefinitionProvider, metal::compiler::compute_include_paths, syntax::SyntaxTree};
 use tower_lsp::lsp_types::{Position, Url};
 
@@ -115,32 +114,20 @@ fn bench_goto_navigation(c: &mut Criterion) {
     };
 
     let provider = Arc::new(DefinitionProvider::new());
-    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
-
-    runtime.block_on({
-        let provider = Arc::clone(&provider);
-        let fixture = fixture.clone();
-        async move {
-            provider.index_document(&fixture.uri, fixture.source.as_str(), fixture.include_paths.as_slice()).await;
-        }
-    });
+    provider.index_document(&fixture.uri, fixture.source.as_str(), fixture.include_paths.as_slice());
 
     c.bench_function("goto_navigation/warm_single_jump", |b| {
         let provider = Arc::clone(&provider);
         let fixture = fixture.clone();
-        let runtime = &runtime;
         b.iter(|| {
-            let result = runtime.block_on(async {
-                provider
-                    .provide(
-                        &fixture.uri,
-                        fixture.jump_positions[0],
-                        fixture.source.as_str(),
-                        fixture.include_paths.as_slice(),
-                        fixture.snapshot.as_ref(),
-                    )
-                    .await
-            });
+            let result = provider.provide(
+                &fixture.uri,
+                fixture.jump_positions[0],
+                fixture.source.as_str(),
+                fixture.include_paths.as_slice(),
+                fixture.snapshot.as_ref(),
+                || false,
+            );
             black_box(result);
         });
     });
@@ -148,49 +135,44 @@ fn bench_goto_navigation(c: &mut Criterion) {
     c.bench_function("goto_navigation/warm_burst_sequential", |b| {
         let provider = Arc::clone(&provider);
         let fixture = fixture.clone();
-        let runtime = &runtime;
         b.iter(|| {
-            runtime.block_on(async {
-                for index in 0..BURST_SIZE {
-                    let position = fixture.jump_positions[index % fixture.jump_positions.len()];
-                    let result = provider
-                        .provide(
-                            &fixture.uri,
-                            position,
-                            fixture.source.as_str(),
-                            fixture.include_paths.as_slice(),
-                            fixture.snapshot.as_ref(),
-                        )
-                        .await;
-                    black_box(result);
-                }
-            });
+            for index in 0..BURST_SIZE {
+                let position = fixture.jump_positions[index % fixture.jump_positions.len()];
+                let result = provider.provide(
+                    &fixture.uri,
+                    position,
+                    fixture.source.as_str(),
+                    fixture.include_paths.as_slice(),
+                    fixture.snapshot.as_ref(),
+                    || false,
+                );
+                black_box(result);
+            }
         });
     });
 
     c.bench_function("goto_navigation/warm_burst_concurrent", |b| {
         let provider = Arc::clone(&provider);
         let fixture = fixture.clone();
-        let runtime = &runtime;
         b.iter(|| {
-            let result = runtime.block_on(async {
-                let tasks = (0..CONCURRENT_SIZE).map(|index| {
+            let result = std::thread::scope(|scope| {
+                let mut jobs = Vec::with_capacity(CONCURRENT_SIZE);
+                for index in 0..CONCURRENT_SIZE {
                     let provider = Arc::clone(&provider);
                     let fixture = fixture.clone();
-                    async move {
+                    jobs.push(scope.spawn(move || {
                         let position = fixture.jump_positions[index % fixture.jump_positions.len()];
-                        provider
-                            .provide(
-                                &fixture.uri,
-                                position,
-                                fixture.source.as_str(),
-                                fixture.include_paths.as_slice(),
-                                fixture.snapshot.as_ref(),
-                            )
-                            .await
-                    }
-                });
-                join_all(tasks).await
+                        provider.provide(
+                            &fixture.uri,
+                            position,
+                            fixture.source.as_str(),
+                            fixture.include_paths.as_slice(),
+                            fixture.snapshot.as_ref(),
+                            || false,
+                        )
+                    }));
+                }
+                jobs.into_iter().map(|job| job.join().expect("benchmark worker panicked")).collect::<Vec<_>>()
             });
             black_box(result);
         });

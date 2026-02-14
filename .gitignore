@@ -58,3 +58,4 @@ Thumbs.db
 *.lsp-tmp.metal
 /external   
 *.vsix
+/scripts/reinstall-local-editors.sh
