@@ -6,7 +6,7 @@ use std::{
 use tokio::{io::AsyncWriteExt, process::Command};
 use tower_lsp::lsp_types::{FormattingOptions, Position, Range, TextEdit};
 
-use crate::{document::Document, server::settings::FormattingSettings};
+use crate::{document::Document, server::metalfmt, server::settings::FormattingSettings};
 
 pub(crate) async fn format_document(
     document: &Document,
@@ -51,11 +51,20 @@ fn clang_format_args(
     assume_filename: String,
 ) -> Vec<String> {
     let mut args = extra_args.to_vec();
+
+    // Try to resolve a metalfmt.toml for the source file.
+    let style = std::path::Path::new(&assume_filename)
+        .canonicalize()
+        .ok()
+        .and_then(|p| metalfmt::resolve_inline_style(&p))
+        .map(|inline| format!("{{{inline}}}"))
+        .unwrap_or_else(|| "file".to_string());
+
     args.extend([
         "--assume-filename".to_string(),
         assume_filename,
         "--style".to_string(),
-        "file".to_string(),
+        style,
         "--fallback-style".to_string(),
         "none".to_string(),
     ]);

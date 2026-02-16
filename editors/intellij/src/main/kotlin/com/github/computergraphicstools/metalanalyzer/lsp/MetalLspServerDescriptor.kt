@@ -28,7 +28,7 @@ class MetalLspServerDescriptor(project: Project) :
             return mapOf(
                 "metal-analyzer" to mapOf(
                     "formatting" to mapOf(
-                        "enabled" to settings.formattingEnabled,
+                        "enable" to settings.formattingEnabled,
                         "command" to settings.formattingCommand,
                         "args" to settings.formattingArgs,
                     ),
@@ -39,7 +39,7 @@ class MetalLspServerDescriptor(project: Project) :
                         "scope" to settings.diagnosticsScope,
                     ),
                     "indexing" to mapOf(
-                        "enabled" to settings.indexingEnabled,
+                        "enable" to settings.indexingEnabled,
                         "concurrency" to settings.indexingConcurrency,
                         "maxFileSizeKb" to settings.indexingMaxFileSizeKb,
                         "projectGraphDepth" to settings.indexingProjectGraphDepth,
