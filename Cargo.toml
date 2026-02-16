@@ -3,7 +3,7 @@ members = ["crates/metal-analyzer", "editors/zed"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.5"
+version = "0.1.6"
 edition = "2024"
 rust-version = "1.93"
 license = "MIT"
@@ -36,7 +36,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 
 # TOML parsing (metalfmt.toml)
-toml = "0.8"
+toml = "1"
 
 # Concurrent data structures
 dashmap = "6"

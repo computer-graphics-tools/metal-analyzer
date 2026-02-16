@@ -39,10 +39,10 @@ lsp-types = "0.97.0"
 [dev-dependencies]
 url = "2"
 walkdir = "2.5.0"
-tower = { version = "0.4", features = ["util"] }
+tower = { version = "0.5", features = ["util"] }
 tower-lsp = { workspace = true }
 tokio = { workspace = true }
-criterion = "0.5"
+criterion = "0.8"
 expect-test = "1.5.1"
 rayon = "1"
 
