@@ -19,6 +19,31 @@ documentation, and integrated formatting (with clang-format).
 See [Installation](./docs/installation.md) for setup instructions for
 VS Code and Zed.
 
+## CLI
+
+metal-analyzer can also be used as a command-line formatter:
+
+```sh
+# Format files in-place
+metal-analyzer format shader.metal compute.metal
+
+# Check formatting without modifying files (exits 1 if changes needed)
+metal-analyzer format --check shader.metal
+
+# Format from stdin
+cat shader.metal | metal-analyzer format
+```
+
+Formatting style is resolved in order:
+
+1. **`metalfmt.toml`** — walks up from the source file looking for a
+   `metalfmt.toml` (see [Formatting](./docs/formatting.md)).
+2. **`.clang-format`** — if no `metalfmt.toml` is found, clang-format's
+   built-in file discovery is used (`.clang-format` / `_clang-format`).
+3. **No config** — if neither file is found, the file is left unchanged.
+
+See `metal-analyzer format --help` for all options.
+
 ## Configuration
 
 See [Configuration](./docs/configuration.md) for available settings.

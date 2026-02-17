@@ -8,7 +8,7 @@ use tower_lsp::lsp_types::{FormattingOptions, Position, Range, TextEdit};
 
 use crate::{document::Document, server::metalfmt, server::settings::FormattingSettings};
 
-pub(crate) async fn format_document(
+pub async fn format_document(
     document: &Document,
     _options: &FormattingOptions,
     formatting_settings: &FormattingSettings,
@@ -46,7 +46,7 @@ fn full_document_range(document: &Document) -> Range {
     }
 }
 
-fn clang_format_args(
+pub fn clang_format_args(
     extra_args: &[String],
     assume_filename: String,
 ) -> Vec<String> {
@@ -71,7 +71,7 @@ fn clang_format_args(
     args
 }
 
-async fn run_clang_format(
+pub async fn run_clang_format(
     executable: &str,
     args: &[String],
     input: &str,
@@ -121,7 +121,7 @@ async fn run_clang_format(
 }
 
 #[derive(Debug)]
-pub(crate) enum FormattingError {
+pub enum FormattingError {
     CommandNotFound(String),
     LaunchFailed {
         command: String,
