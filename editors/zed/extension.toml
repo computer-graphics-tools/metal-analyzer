@@ -1,8 +1,8 @@
 id = "metal"
 name = "metal-analyzer"
-version = "0.1.10"
+version = "0.1.11"
 schema_version = 1
-description = "metal-analyzer for Metal with enhanced syntax highlighting and fast navigation"
+description = "Metal support."
 authors = ["Eugene Bokhan <eugenebokhan@icloud.com>"]
 repository = "https://github.com/computer-graphics-tools/metal-analyzer"
 icon_path = "../../editors/code/icon.png"

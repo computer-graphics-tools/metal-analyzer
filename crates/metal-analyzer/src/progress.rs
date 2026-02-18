@@ -13,16 +13,12 @@
 //! token.end(Some("done".into())).await;
 //! ```
 
-use std::{
-    panic::AssertUnwindSafe,
-    sync::atomic::{AtomicU64, Ordering},
-};
+use std::panic::AssertUnwindSafe;
 
 use futures::FutureExt;
 use tower_lsp::{Client, lsp_types::*};
 use tracing::{debug, warn};
 
-static NEXT_PROGRESS_ID: AtomicU64 = AtomicU64::new(1);
 const PROGRESS_TITLE_PREFIX: &str = "metal-analyzer:";
 
 /// A handle to an active work-done progress session.
@@ -52,8 +48,7 @@ impl ProgressToken {
         title: &str,
         message: Option<String>,
     ) -> Self {
-        let id = NEXT_PROGRESS_ID.fetch_add(1, Ordering::Relaxed);
-        let token = NumberOrString::String(format!("metal-analyzer/{id}"));
+        let token = NumberOrString::String(format!("metal-analyzer: {title}"));
         let display_title = prefixed_progress_title(title);
 
         // Send workDoneProgress/create as a background task so that:
