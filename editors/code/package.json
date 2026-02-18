@@ -2,7 +2,7 @@
   "name": "metal-analyzer",
   "displayName": "metal-analyzer",
   "description": "Metal language support via metal-analyzer",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "publisher": "eugenebokhan",
   "license": "MIT",
   "repository": {
