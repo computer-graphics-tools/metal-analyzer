@@ -1,6 +1,6 @@
 id = "metal"
 name = "metal-analyzer"
-version = "0.1.7"
+version = "0.1.8"
 schema_version = 1
 description = "metal-analyzer for Metal with enhanced syntax highlighting and fast navigation"
 authors = ["Eugene Bokhan <eugenebokhan@icloud.com>"]
