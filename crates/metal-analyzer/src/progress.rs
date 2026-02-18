@@ -53,7 +53,7 @@ impl ProgressToken {
         message: Option<String>,
     ) -> Self {
         let id = NEXT_PROGRESS_ID.fetch_add(1, Ordering::Relaxed);
-        let token = NumberOrString::String(format!("metalAnalyzer/{title}/{id}"));
+        let token = NumberOrString::String(format!("metal-analyzer/{id}"));
         let display_title = prefixed_progress_title(title);
 
         // Send workDoneProgress/create as a background task so that:

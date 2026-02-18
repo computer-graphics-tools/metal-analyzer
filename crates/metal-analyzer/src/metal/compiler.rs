@@ -648,6 +648,7 @@ impl MetalCompiler {
             "-o".to_string(),
             air_file.display().to_string(),
             "-fno-color-diagnostics".to_string(),
+            "-Wno-unneeded-internal-declaration".to_string(),
         ];
 
         let merged_include_paths = self.collect_include_paths(uri, include_paths);
