@@ -160,14 +160,6 @@ impl LanguageServer for MetalLanguageServer {
 
     async fn shutdown(&self) -> Result<()> {
         info!("Shutting down metal-analyzer");
-        self.client
-            .show_message(
-                MessageType::WARNING,
-                prefixed_client_message(
-                    "Shutting down. Language features will be unavailable until the server restarts.",
-                ),
-            )
-            .await;
         Ok(())
     }
 
