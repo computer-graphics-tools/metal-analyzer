@@ -101,13 +101,36 @@ pub(crate) fn resolve_include_path(
     }
 
     for include_dir in include_paths {
-        let candidate = Path::new(include_dir).join(include);
-        if candidate.exists() {
-            return Some(normalize_path(&candidate));
+        if let Some(framework_root) = include_dir.strip_prefix(crate::metal::compiler::FRAMEWORK_DIR_PREFIX) {
+            if let Some(resolved) = resolve_framework_include(framework_root, include_path) {
+                return Some(resolved);
+            }
+        } else {
+            let candidate = Path::new(include_dir).join(include);
+            if candidate.exists() {
+                return Some(normalize_path(&candidate));
+            }
         }
     }
 
     None
+}
+
+/// Resolve a framework-style include using clang's lookup rule:
+///   `Foo/Bar.h`  →  `<framework_root>/Foo.framework/Headers/Bar.h`
+pub(crate) fn resolve_framework_include(framework_root: &str, include_path: &str) -> Option<PathBuf> {
+    let include = Path::new(include_path);
+    let mut components = include.components();
+    let first = components.next()?.as_os_str().to_str()?;
+    let rest = components.as_path();
+    if rest.as_os_str().is_empty() {
+        return None;
+    }
+    let candidate = Path::new(framework_root)
+        .join(format!("{first}.framework"))
+        .join("Headers")
+        .join(rest);
+    if candidate.exists() { Some(normalize_path(&candidate)) } else { None }
 }
 
 pub(crate) fn normalize_path(path: &Path) -> PathBuf {

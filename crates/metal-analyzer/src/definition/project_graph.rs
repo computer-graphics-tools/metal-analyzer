@@ -149,9 +149,15 @@ fn resolve_include_path(
     }
 
     for include_dir in include_paths {
-        let candidate = Path::new(include_dir).join(include);
-        if candidate.exists() {
-            return Some(normalized_path(&candidate));
+        if let Some(framework_root) = include_dir.strip_prefix(crate::metal::compiler::FRAMEWORK_DIR_PREFIX) {
+            if let Some(resolved) = crate::server::header_owners::resolve_framework_include(framework_root, include_path) {
+                return Some(normalized_path(&resolved));
+            }
+        } else {
+            let candidate = Path::new(include_dir).join(include);
+            if candidate.exists() {
+                return Some(normalized_path(&candidate));
+            }
         }
     }
 

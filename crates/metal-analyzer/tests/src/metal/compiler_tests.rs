@@ -70,9 +70,15 @@ End of search list.
         paths.contains(&include_dir.canonicalize().expect("canonical include")),
         "regular include dirs should be captured from search list"
     );
+    let canonical_framework = framework_dir.canonicalize().expect("canonical framework");
+    let expected_entry = PathBuf::from(format!(
+        "{}{}",
+        FRAMEWORK_DIR_PREFIX,
+        canonical_framework.display()
+    ));
     assert!(
-        paths.contains(&framework_dir.canonicalize().expect("canonical framework")),
-        "framework include dirs should be captured from search list"
+        paths.contains(&expected_entry),
+        "framework dirs should be encoded with the framework: prefix (got: {paths:?})"
     );
 
     std::fs::remove_dir_all(&temp_dir).ok();

@@ -191,12 +191,22 @@ impl DefinitionProvider {
             };
 
             for dir in include_paths {
-                let dir_path = std::path::Path::new(dir);
-                if let Some(loc) = check_path(dir_path.join(&path)) {
-                    return Some(loc);
-                }
-                if is_system && let Some(loc) = check_path(dir_path.join("metal").join(&path)) {
-                    return Some(loc);
+                if let Some(framework_root) = dir.strip_prefix(crate::metal::compiler::FRAMEWORK_DIR_PREFIX) {
+                    if is_system {
+                        if let Some(resolved) = crate::server::header_owners::resolve_framework_include(framework_root, &path) {
+                            if let Some(loc) = check_path(resolved) {
+                                return Some(loc);
+                            }
+                        }
+                    }
+                } else {
+                    let dir_path = std::path::Path::new(dir);
+                    if let Some(loc) = check_path(dir_path.join(&path)) {
+                        return Some(loc);
+                    }
+                    if is_system && let Some(loc) = check_path(dir_path.join("metal").join(&path)) {
+                        return Some(loc);
+                    }
                 }
             }
 

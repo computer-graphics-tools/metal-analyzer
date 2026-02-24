@@ -168,6 +168,13 @@ fn should_exclude_dir(name: &str) -> bool {
     matches!(name, "target" | "build" | "node_modules" | ".git" | ".cargo" | "out" | "bin" | "obj")
 }
 
+/// Prefix used to tag framework search roots inside include-path lists.
+///
+/// `resolve_include_path` recognises entries with this prefix and applies
+/// clang's framework lookup rule:
+///   `#include <Foo/Bar.h>`  →  `<framework_root>/Foo.framework/Headers/Bar.h`
+pub const FRAMEWORK_DIR_PREFIX: &str = "framework:";
+
 fn parse_include_search_paths(raw_output: &str) -> Vec<PathBuf> {
     let mut parsing_includes = false;
     let mut discovered_paths = Vec::new();
@@ -189,9 +196,21 @@ fn parse_include_search_paths(raw_output: &str) -> Vec<PathBuf> {
         }
 
         // Clang may annotate framework roots as " (framework directory)".
+        let is_framework_dir = trimmed.ends_with(" (framework directory)");
         let path_text = trimmed.trim_end_matches(" (framework directory)").trim_matches('"');
         if let Some(path) = normalize_existing_path(PathBuf::from(path_text)) {
-            discovered_paths.push(path);
+            if is_framework_dir {
+                // Encode framework roots with a special prefix so that
+                // resolve_include_path can apply the framework lookup rule:
+                //   `<Foo/Bar.h>` → `<root>/Foo.framework/Headers/Bar.h`
+                discovered_paths.push(PathBuf::from(format!(
+                    "{}{}",
+                    FRAMEWORK_DIR_PREFIX,
+                    path.display()
+                )));
+            } else {
+                discovered_paths.push(path);
+            }
         }
     }
 
@@ -653,8 +672,13 @@ impl MetalCompiler {
 
         let merged_include_paths = self.collect_include_paths(uri, include_paths);
         for p in &merged_include_paths {
-            args.push("-I".to_string());
-            args.push(p.clone());
+            if let Some(framework_root) = p.strip_prefix(FRAMEWORK_DIR_PREFIX) {
+                args.push("-F".to_string());
+                args.push(framework_root.to_string());
+            } else {
+                args.push("-I".to_string());
+                args.push(p.clone());
+            }
         }
 
         // ── Effective flags ──────────────────────────────────────────────

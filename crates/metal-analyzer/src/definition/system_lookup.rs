@@ -102,6 +102,10 @@ pub(super) fn system_builtin_header_candidates(include_paths: &[String]) -> Vec<
     let mut out = Vec::new();
 
     for include_path in include_paths {
+        // Framework roots hold *.framework bundles, not flat metal stdlib headers.
+        if include_path.starts_with(crate::metal::compiler::FRAMEWORK_DIR_PREFIX) {
+            continue;
+        }
         let include_root = PathBuf::from(include_path);
         let roots = [include_root.clone(), include_root.join("metal")];
         for root in roots {

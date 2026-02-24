@@ -62,8 +62,13 @@ pub(crate) fn run_ast_dump(
 
     for path in include_paths {
         if seen_includes.insert(path.clone()) {
-            args.push("-I".to_string());
-            args.push(path.clone());
+            if let Some(framework_root) = path.strip_prefix(crate::metal::compiler::FRAMEWORK_DIR_PREFIX) {
+                args.push("-F".to_string());
+                args.push(framework_root.to_string());
+            } else {
+                args.push("-I".to_string());
+                args.push(path.clone());
+            }
         }
     }
 
