@@ -1,0 +1,82 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Metal",
+  "scopeName": "source.metal",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#preprocessor" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#attributes" },
+    { "include": "#metal-keywords" },
+    { "include": "#metal-types" },
+    { "include": "#cpp-keywords" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.double-slash.metal", "match": "//.*$" },
+        { "name": "comment.block.metal", "begin": "/\\*", "end": "\\*/" }
+      ]
+    },
+    "preprocessor": {
+      "patterns": [
+        { "name": "keyword.control.directive.metal", "match": "^\\s*#\\s*(include|define|undef|if|ifdef|ifndef|else|elif|endif|pragma|error|warning)\\b" },
+        { "name": "string.quoted.other.include.metal", "match": "(?<=#\\s*include\\s+)<[^>]+>" }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        { "name": "string.quoted.double.metal", "begin": "\"", "end": "\"", "patterns": [{ "name": "constant.character.escape.metal", "match": "\\\\." }] },
+        { "name": "string.quoted.single.metal", "begin": "'", "end": "'", "patterns": [{ "name": "constant.character.escape.metal", "match": "\\\\." }] }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        { "name": "constant.numeric.hex.metal", "match": "\\b0[xX][0-9a-fA-F]+[uUlL]*\\b" },
+        { "name": "constant.numeric.float.metal", "match": "\\b[0-9]+\\.[0-9]*([eE][+-]?[0-9]+)?[fFhH]?\\b|\\b\\.[0-9]+([eE][+-]?[0-9]+)?[fFhH]?\\b" },
+        { "name": "constant.numeric.integer.metal", "match": "\\b[0-9]+[uUlL]*\\b" }
+      ]
+    },
+    "attributes": {
+      "patterns": [
+        { "name": "entity.other.attribute-name.metal", "match": "\\[\\[[a-zA-Z_][a-zA-Z0-9_]*(\\([^)]*\\))?\\]\\]" }
+      ]
+    },
+    "metal-keywords": {
+      "patterns": [
+        { "name": "keyword.other.qualifier.metal", "match": "\\b(kernel|vertex|fragment|mesh|object|compute)\\b" },
+        { "name": "storage.modifier.metal", "match": "\\b(device|threadgroup|threadgroup_imageblock|constant|thread|ray_data)\\b" },
+        { "name": "keyword.other.metal", "match": "\\b(stage_in|visible)\\b" }
+      ]
+    },
+    "metal-types": {
+      "patterns": [
+        { "name": "storage.type.metal", "match": "\\b(half|half[234]|half[234]x[234])\\b" },
+        { "name": "storage.type.metal", "match": "\\b(float[234]|float[234]x[234]|float)\\b" },
+        { "name": "storage.type.metal", "match": "\\b(bfloat|bfloat16_t|bfloat[234])\\b" },
+        { "name": "storage.type.metal", "match": "\\b(bool[234]?|char|uchar|short|ushort|int|uint|long|ulong)\\b" },
+        { "name": "storage.type.metal", "match": "\\b(int[234]|uint[234]|short[234]|ushort[234]|char[234]|uchar[234])\\b" },
+        { "name": "storage.type.metal", "match": "\\b(sampler|texture[123]d|texture[12]d_array|texture2d_ms|texture2d_ms_array|texturecube|texturecube_array|texture_buffer)\\b" },
+        { "name": "storage.type.metal", "match": "\\b(depth2d|depth2d_array|depth2d_ms|depthcube|depthcube_array)\\b" },
+        { "name": "storage.type.metal", "match": "\\b(atomic_int|atomic_uint|atomic_bool|atomic_float)\\b" },
+        { "name": "storage.type.metal", "match": "\\b(packed_[a-z]+[234])\\b" }
+      ]
+    },
+    "cpp-keywords": {
+      "patterns": [
+        { "name": "keyword.control.metal", "match": "\\b(if|else|for|while|do|switch|case|default|break|continue|return|goto)\\b" },
+        { "name": "storage.type.metal", "match": "\\b(void|struct|class|enum|union|typedef|using|namespace|template|typename)\\b" },
+        { "name": "storage.modifier.metal", "match": "\\b(const|constexpr|static|inline|volatile|extern|mutable|virtual|explicit)\\b" },
+        { "name": "keyword.operator.metal", "match": "\\b(sizeof|alignof|decltype|static_cast|dynamic_cast|reinterpret_cast|const_cast|static_assert)\\b" },
+        { "name": "constant.language.metal", "match": "\\b(true|false|nullptr)\\b" }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        { "name": "keyword.operator.metal", "match": "[-+*/%&|^~!<>=]=?|&&|\\|\\||<<|>>|\\+\\+|--|->|\\." }
+      ]
+    }
+  }
+}

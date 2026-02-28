@@ -1,0 +1,51 @@
+[package]
+name = "metal-analyzer"
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+edition.workspace = true
+description = "A Language Server Protocol implementation for Apple's Metal Shading Language"
+keywords = ["lsp", "metal", "shader", "gpu", "language-server"]
+categories = ["development-tools", "text-editors"]
+
+[lib]
+name = "metal_analyzer"
+path = "src/lib.rs"
+
+[[bin]]
+name = "metal-analyzer"
+path = "src/main.rs"
+
+[dependencies]
+tower-lsp = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+clang-ast = { workspace = true }
+clap = { workspace = true }
+regex = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+toml = { workspace = true }
+dashmap = { workspace = true }
+once_cell = { workspace = true }
+futures = "0.3"
+walkdir = "2.5.0"
+rowan = "0.16.1"
+logos = "0.16.1"
+lsp-types = "0.97.0"
+
+[dev-dependencies]
+url = "2"
+walkdir = "2.5.0"
+tower = { version = "0.5", features = ["util"] }
+tower-lsp = { workspace = true }
+tokio = { workspace = true }
+criterion = "0.8"
+expect-test = "1.5.1"
+rayon = "1"
+
+[[bench]]
+name = "goto_navigation"
+harness = false

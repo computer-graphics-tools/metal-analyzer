@@ -1,0 +1,45 @@
+<idea-plugin>
+    <id>com.github.computergraphicstools.metalanalyzer</id>
+    <name>Metal Analyzer</name>
+    <vendor url="https://github.com/computer-graphics-tools/metal-analyzer">eugenebokhan</vendor>
+    <description><![CDATA[
+        Metal Shading Language (MSL) support powered by the
+        <a href="https://github.com/computer-graphics-tools/metal-analyzer">metal-analyzer</a>
+        language server.
+        <ul>
+            <li>Real-time diagnostics via xcrun metal</li>
+            <li>Auto-completion for built-in types, functions, and keywords</li>
+            <li>Hover documentation</li>
+            <li>Go to definition, declaration, type definition, implementation, and references</li>
+            <li>Document and workspace symbol search</li>
+            <li>Rename refactoring</li>
+            <li>Code formatting via clang-format</li>
+            <li>Semantic token highlighting</li>
+        </ul>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.lsp</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <fileType
+                name="Metal"
+                language="Metal"
+                extensions="metal"
+                fieldName="INSTANCE"
+                implementationClass="com.github.computergraphicstools.metalanalyzer.MetalFileType"/>
+        <applicationConfigurable
+                parentId="language"
+                instance="com.github.computergraphicstools.metalanalyzer.settings.MetalAnalyzerConfigurable"
+                id="metalAnalyzer.settings"
+                displayName="Metal Analyzer"/>
+        <applicationService
+                serviceImplementation="com.github.computergraphicstools.metalanalyzer.settings.MetalAnalyzerSettings"/>
+        <notificationGroup
+                id="Metal Analyzer"
+                displayType="BALLOON"
+                isLogByDefault="true"/>
+        <platform.lsp.serverSupportProvider
+                implementation="com.github.computergraphicstools.metalanalyzer.lsp.MetalLspServerSupportProvider"/>
+    </extensions>
+</idea-plugin>

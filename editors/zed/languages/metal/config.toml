@@ -1,0 +1,12 @@
+name = "Metal"
+grammar = "cpp"
+path_suffixes = ["metal"]
+line_comments = ["//"]
+block_comment = ["/*", "*/"]
+
+brackets = [
+  { start = "{", end = "}", close = true, newline = true },
+  { start = "[", end = "]", close = true, newline = true },
+  { start = "(", end = ")", close = true, newline = false },
+  { start = "<", end = ">", close = false, newline = false },
+]
