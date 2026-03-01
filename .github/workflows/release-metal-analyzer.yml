@@ -262,12 +262,18 @@ jobs:
     needs: release
     if: ${{ !github.event.release.prerelease }}
     steps:
-      - uses: huacnlee/zed-extension-action@v2
-        with:
-          extension-name: metal
-          push-to: computer-graphics-tools/extensions
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Publish Zed extension
         env:
           COMMITTER_TOKEN: ${{ secrets.COMMITTER_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: uv run tools/publish_zed_extension.py
 
   publish-intellij-plugin:
     name: Publish IntelliJ Plugin
