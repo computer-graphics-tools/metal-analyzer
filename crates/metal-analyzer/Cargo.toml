@@ -21,6 +21,7 @@ tower-lsp = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_stacker = { workspace = true }
 clang-ast = { workspace = true }
 clap = { workspace = true }
 regex = { workspace = true }

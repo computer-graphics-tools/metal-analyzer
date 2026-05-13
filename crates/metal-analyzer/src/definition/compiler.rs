@@ -35,7 +35,7 @@ pub(crate) fn run_ast_dump(
 
     let content = if let Ok(original_path) = uri.to_file_path() {
         if let Some(parent) = original_path.parent() {
-            rewrite_includes(source, parent)
+            rewrite_includes(source, parent, include_paths)
         } else {
             source.to_string()
         }
@@ -134,6 +134,7 @@ pub(crate) fn run_ast_dump(
 fn rewrite_includes(
     source: &str,
     base_dir: &std::path::Path,
+    include_paths: &[String],
 ) -> String {
     let mut output = String::with_capacity(source.len());
     for line in source.lines() {
@@ -143,21 +144,45 @@ fn rewrite_includes(
             && let Some(end) = line[start + 1..].find('"')
         {
             let rel_path = &line[start + 1..start + 1 + end];
-            if !std::path::Path::new(rel_path).is_absolute() {
-                let abs_path = base_dir.join(rel_path);
-                if abs_path.exists() {
-                    output.push_str(&line[..start + 1]);
-                    output.push_str(&abs_path.display().to_string());
-                    output.push_str(&line[start + 1 + end..]);
-                    output.push('\n');
-                    continue;
-                }
+            if !std::path::Path::new(rel_path).is_absolute()
+                && let Some(resolved) = resolve_quoted_include(rel_path, base_dir, include_paths)
+            {
+                output.push_str(&line[..start + 1]);
+                output.push_str(&resolved.display().to_string());
+                output.push_str(&line[start + 1 + end..]);
+                output.push('\n');
+                continue;
             }
         }
         output.push_str(line);
         output.push('\n');
     }
     output
+}
+
+// Resolve a `#include "rel"` against (a) the including file's directory, then
+// (b) each non-framework `-I` root. Returning the first path that exists lets
+// us rewrite the include to an absolute form before the source is copied into
+// a temp shader, where relative `..` segments would otherwise point nowhere.
+fn resolve_quoted_include(
+    rel_path: &str,
+    base_dir: &std::path::Path,
+    include_paths: &[String],
+) -> Option<std::path::PathBuf> {
+    let primary = base_dir.join(rel_path);
+    if primary.exists() {
+        return Some(primary);
+    }
+    for include_path in include_paths {
+        if include_path.starts_with(crate::metal::compiler::FRAMEWORK_DIR_PREFIX) {
+            continue;
+        }
+        let candidate = std::path::Path::new(include_path).join(rel_path);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 #[cfg(test)]

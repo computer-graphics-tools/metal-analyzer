@@ -644,7 +644,7 @@ impl DefinitionProvider {
     ) -> Option<AstIndex> {
         let (ast_json, tmp_files) = run_ast_dump(source, uri, include_paths)?;
 
-        let root: Node = match serde_json::from_str(&ast_json) {
+        let root: Node = match parse_ast_json(&ast_json) {
             Ok(v) => v,
             Err(error) => {
                 warn!("Failed to parse AST JSON: {error}");
@@ -729,6 +729,18 @@ fn content_hash(source: &str) -> String {
     let mut hasher = DefaultHasher::new();
     source.hash(&mut hasher);
     format!("{:x}", hasher.finish())
+}
+
+// Clang's `-ast-dump=json` for large Metal kernels nests expression trees
+// deeper than serde_json's default 128-level recursion cap. Disable the cap
+// and route through serde_stacker so deep recursion grows the stack on demand
+// instead of blowing it.
+fn parse_ast_json(json: &str) -> serde_json::Result<Node> {
+    use serde::Deserialize;
+    let mut deserializer = serde_json::Deserializer::from_str(json);
+    deserializer.disable_recursion_limit();
+    let deserializer = serde_stacker::Deserializer::new(&mut deserializer);
+    Node::deserialize(deserializer)
 }
 
 #[cfg(test)]
