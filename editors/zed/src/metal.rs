@@ -35,25 +35,37 @@ impl MetalExtension {
             return Ok(path);
         }
 
+        // An already-downloaded binary from a previous run. Used as a fallback
+        // whenever the GitHub release check or download fails (e.g. API rate
+        // limiting on a shared IP), so a transient network error never leaves
+        // the server uninstalled when a working binary is already on disk.
+        let cached_on_disk = find_cached_binary();
+
         zed::set_language_server_installation_status(
             language_server_id,
             &zed::LanguageServerInstallationStatus::CheckingForUpdate,
         );
 
-        let release = zed::latest_github_release(
+        let release = match zed::latest_github_release(
             GITHUB_REPO,
             GithubReleaseOptions {
                 require_assets: true,
                 pre_release: false,
             },
-        )
-        .map_err(|error| {
-            zed::set_language_server_installation_status(
-                language_server_id,
-                &zed::LanguageServerInstallationStatus::None,
-            );
-            error
-        })?;
+        ) {
+            Ok(release) => release,
+            Err(error) => {
+                zed::set_language_server_installation_status(
+                    language_server_id,
+                    &zed::LanguageServerInstallationStatus::None,
+                );
+                if let Some(path) = &cached_on_disk {
+                    self.cached_binary_path = Some(path.clone());
+                    return Ok(path.clone());
+                }
+                return Err(error);
+            },
+        };
 
         let (os, arch) = zed::current_platform();
         let release_asset_name = match (os, arch) {
@@ -88,30 +100,36 @@ impl MetalExtension {
             return Ok(binary_path);
         }
 
-        let asset = release
-            .assets
-            .iter()
-            .find(|asset| asset.name == release_asset_name)
-            .ok_or_else(|| format!("no release asset found matching {release_asset_name}"))
-            .map_err(|error| {
+        let asset = match release.assets.iter().find(|asset| asset.name == release_asset_name) {
+            Some(asset) => asset,
+            None => {
                 zed::set_language_server_installation_status(
                     language_server_id,
                     &zed::LanguageServerInstallationStatus::None,
                 );
-                error
-            })?;
+                if let Some(path) = &cached_on_disk {
+                    self.cached_binary_path = Some(path.clone());
+                    return Ok(path.clone());
+                }
+                return Err(format!("no release asset found matching {release_asset_name}"));
+            },
+        };
 
         zed::set_language_server_installation_status(
             language_server_id,
             &zed::LanguageServerInstallationStatus::Downloading,
         );
-        zed::download_file(&asset.download_url, &version_dir, DownloadedFileType::GzipTar).map_err(|error| {
+        if let Err(error) = zed::download_file(&asset.download_url, &version_dir, DownloadedFileType::GzipTar) {
             zed::set_language_server_installation_status(
                 language_server_id,
                 &zed::LanguageServerInstallationStatus::None,
             );
-            error
-        })?;
+            if let Some(path) = &cached_on_disk {
+                self.cached_binary_path = Some(path.clone());
+                return Ok(path.clone());
+            }
+            return Err(error);
+        }
         zed::make_file_executable(&binary_path).map_err(|error| {
             zed::set_language_server_installation_status(
                 language_server_id,
@@ -137,6 +155,34 @@ impl MetalExtension {
             .and_then(|binary| binary.arguments)
             .unwrap_or_default()
     }
+}
+
+// Scan the extension work directory for the newest already-downloaded
+// `metal-analyzer-<version>/metal-analyzer` binary, if any.
+fn find_cached_binary() -> Option<String> {
+    let prefix = format!("{SERVER_NAME}-");
+    let mut newest: Option<(std::time::SystemTime, String)> = None;
+    for entry in fs::read_dir(".").ok()?.flatten() {
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            continue;
+        };
+        if !name.starts_with(&prefix) || !entry.path().is_dir() {
+            continue;
+        }
+        let binary_path = format!("{name}/{SERVER_NAME}");
+        if !fs::metadata(&binary_path).is_ok_and(|stat| stat.is_file()) {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        if newest.as_ref().is_none_or(|(newest_time, _)| modified >= *newest_time) {
+            newest = Some((modified, binary_path));
+        }
+    }
+    newest.map(|(_, path)| path)
 }
 
 fn remove_outdated_versions(current_version_dir: &str) -> Result<()> {
