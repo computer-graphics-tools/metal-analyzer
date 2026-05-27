@@ -35,37 +35,36 @@ impl MetalExtension {
             return Ok(path);
         }
 
-        // An already-downloaded binary from a previous run. Used as a fallback
-        // whenever the GitHub release check or download fails (e.g. API rate
-        // limiting on a shared IP), so a transient network error never leaves
-        // the server uninstalled when a working binary is already on disk.
-        let cached_on_disk = find_cached_binary();
+        // Prefer a binary already downloaded by a previous run. Reusing it
+        // avoids contacting the GitHub API on every launch, which otherwise
+        // fails outright under API rate limiting (e.g. a shared egress IP) and
+        // leaves the server uninstalled even though a working binary is present.
+        // The release check below only runs on a true first install, when no
+        // binary exists yet. To force an upgrade, delete the cached
+        // `metal-analyzer-*` directory or set `lsp.metal-analyzer.binary.path`.
+        if let Some(path) = find_cached_binary() {
+            self.cached_binary_path = Some(path.clone());
+            return Ok(path);
+        }
 
         zed::set_language_server_installation_status(
             language_server_id,
             &zed::LanguageServerInstallationStatus::CheckingForUpdate,
         );
 
-        let release = match zed::latest_github_release(
+        let release = zed::latest_github_release(
             GITHUB_REPO,
             GithubReleaseOptions {
                 require_assets: true,
                 pre_release: false,
             },
-        ) {
-            Ok(release) => release,
-            Err(error) => {
-                zed::set_language_server_installation_status(
-                    language_server_id,
-                    &zed::LanguageServerInstallationStatus::None,
-                );
-                if let Some(path) = &cached_on_disk {
-                    self.cached_binary_path = Some(path.clone());
-                    return Ok(path.clone());
-                }
-                return Err(error);
-            },
-        };
+        )
+        .inspect_err(|_| {
+            zed::set_language_server_installation_status(
+                language_server_id,
+                &zed::LanguageServerInstallationStatus::None,
+            );
+        })?;
 
         let (os, arch) = zed::current_platform();
         let release_asset_name = match (os, arch) {
@@ -100,42 +99,33 @@ impl MetalExtension {
             return Ok(binary_path);
         }
 
-        let asset = match release.assets.iter().find(|asset| asset.name == release_asset_name) {
-            Some(asset) => asset,
-            None => {
+        let asset = release
+            .assets
+            .iter()
+            .find(|asset| asset.name == release_asset_name)
+            .ok_or_else(|| format!("no release asset found matching {release_asset_name}"))
+            .inspect_err(|_| {
                 zed::set_language_server_installation_status(
                     language_server_id,
                     &zed::LanguageServerInstallationStatus::None,
                 );
-                if let Some(path) = &cached_on_disk {
-                    self.cached_binary_path = Some(path.clone());
-                    return Ok(path.clone());
-                }
-                return Err(format!("no release asset found matching {release_asset_name}"));
-            },
-        };
+            })?;
 
         zed::set_language_server_installation_status(
             language_server_id,
             &zed::LanguageServerInstallationStatus::Downloading,
         );
-        if let Err(error) = zed::download_file(&asset.download_url, &version_dir, DownloadedFileType::GzipTar) {
+        zed::download_file(&asset.download_url, &version_dir, DownloadedFileType::GzipTar).inspect_err(|_| {
             zed::set_language_server_installation_status(
                 language_server_id,
                 &zed::LanguageServerInstallationStatus::None,
             );
-            if let Some(path) = &cached_on_disk {
-                self.cached_binary_path = Some(path.clone());
-                return Ok(path.clone());
-            }
-            return Err(error);
-        }
-        zed::make_file_executable(&binary_path).map_err(|error| {
+        })?;
+        zed::make_file_executable(&binary_path).inspect_err(|_| {
             zed::set_language_server_installation_status(
                 language_server_id,
                 &zed::LanguageServerInstallationStatus::None,
             );
-            error
         })?;
         zed::set_language_server_installation_status(language_server_id, &zed::LanguageServerInstallationStatus::None);
 
