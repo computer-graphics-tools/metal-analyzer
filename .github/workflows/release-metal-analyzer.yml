@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Verify release tag matches workspace/editor versions
         env:
@@ -103,7 +103,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Rust target
         uses: dtolnay/rust-toolchain@stable
@@ -123,7 +123,7 @@ jobs:
           tar -C dist -czf "${{ matrix.asset_name }}" metal-analyzer
 
       - name: Upload packaged binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.asset_name }}
           path: ${{ matrix.asset_name }}
@@ -134,7 +134,7 @@ jobs:
     needs: build-binaries
     steps:
       - name: Download packaged binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
 
@@ -149,15 +149,15 @@ jobs:
           sha256sum ./*.tar.gz > SHA256SUMS
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@v4.1.2
 
       - name: Sign checksums
         run: |
           cd release
-          cosign sign-blob --yes --output-signature SHA256SUMS.sig --output-certificate SHA256SUMS.pem SHA256SUMS
+          cosign sign-blob --yes --new-bundle-format=false --use-signing-config=false --output-signature SHA256SUMS.sig --output-certificate SHA256SUMS.pem SHA256SUMS
 
       - name: Attach assets to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.release.tag_name }}
           overwrite_files: true
@@ -174,7 +174,7 @@ jobs:
     needs: verify-release-versions
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -218,7 +218,7 @@ jobs:
     needs: verify-release-versions
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -263,10 +263,10 @@ jobs:
     if: ${{ !github.event.release.prerelease }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.2.0
 
       - name: Publish Zed extension
         env:
@@ -281,10 +281,10 @@ jobs:
     needs: verify-release-versions
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: 17

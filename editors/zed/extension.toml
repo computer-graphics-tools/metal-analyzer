@@ -13,4 +13,4 @@ languages = ["Metal"]
 
 [grammars.cpp]
 repository = "https://github.com/tree-sitter/tree-sitter-cpp"
-commit = "12bd6f7e96080d2e70ec51d4068f2f66120dde35"
+commit = "c009222808634c1014f82438d4883753516a2c24"

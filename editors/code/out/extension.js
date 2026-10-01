@@ -180,7 +180,7 @@ function createLanguageClient(serverPath) {
             configurationSection: "metal-analyzer",
         },
         outputChannelName: "metal-analyzer",
-        traceOutputChannel: vscode.window.createOutputChannel("metal-analyzer (LSP Trace)"),
+        traceOutputChannel: vscode.window.createOutputChannel("metal-analyzer (LSP Trace)", { log: true }),
     };
     return new node_1.LanguageClient("metal-analyzer", "metal-analyzer", serverOptions, clientOptions);
 }
