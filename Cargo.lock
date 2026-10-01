@@ -900,7 +900,7 @@ dependencies = [
 
 [[package]]
 name = "metal-analyzer"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "clang-ast",
  "clap",
@@ -2129,7 +2129,7 @@ dependencies = [
 
 [[package]]
 name = "zed_metal"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "zed_extension_api",
 ]
