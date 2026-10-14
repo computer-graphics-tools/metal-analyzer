@@ -67,10 +67,10 @@ End of search list.
     );
     let paths = parse_include_search_paths(&compiler_output);
     assert!(
-        paths.contains(&include_dir.canonicalize().expect("canonical include")),
+        paths.contains(&dunce::canonicalize(&include_dir).expect("canonical include")),
         "regular include dirs should be captured from search list"
     );
-    let canonical_framework = framework_dir.canonicalize().expect("canonical framework");
+    let canonical_framework = dunce::canonicalize(&framework_dir).expect("canonical framework");
     let expected_entry = PathBuf::from(format!(
         "{}{}",
         FRAMEWORK_DIR_PREFIX,
@@ -97,11 +97,11 @@ fn fallback_include_paths_derives_clang_resource_include() {
     std::fs::write(&metal_binary, "").expect("create fake metal binary file");
     std::fs::create_dir_all(&clang_include).expect("create fake clang include dir");
 
-    let signature = metal_binary.canonicalize().expect("canonical fake metal binary");
+    let signature = dunce::canonicalize(&metal_binary).expect("canonical fake metal binary");
     let fallback = fallback_include_paths_from_toolchain_signature(Some(&signature.display().to_string()));
 
     assert!(
-        fallback.contains(&clang_include.canonicalize().expect("canonical clang include")),
+        fallback.contains(&dunce::canonicalize(&clang_include).expect("canonical clang include")),
         "fallback should derive clang include dirs from toolchain binary layout"
     );
 
@@ -142,24 +142,46 @@ fn include_cache_is_fresh_detects_signature_and_path_staleness() {
     std::fs::remove_dir_all(&temp_dir).ok();
 }
 
+/// Absolute path below the filesystem root (`/` or `C:\`), as a native string.
+fn rooted(relative: &str) -> String {
+    let root = if cfg!(windows) {
+        PathBuf::from(r"C:\")
+    } else {
+        PathBuf::from("/")
+    };
+    relative.split('/').filter(|part| !part.is_empty()).fold(root, |path, part| path.join(part)).display().to_string()
+}
+
+fn rooted_uri(relative: &str) -> String {
+    Url::from_file_path(rooted(relative)).expect("rooted path is a valid file URI").to_string()
+}
+
 #[test]
 fn include_paths_from_file_uri() {
-    let paths = MetalCompiler::include_paths_from_uri(
-        "file:///Users/dev/project/crates/shaders/src/backends/metal/kernel/matmul/gemm/shaders/test.metal",
-    );
+    let paths = MetalCompiler::include_paths_from_uri(&rooted_uri(
+        "Users/dev/project/crates/shaders/src/backends/metal/kernel/matmul/gemm/shaders/test.metal",
+    ));
 
     // The deepest path should come first.
     assert!(!paths.is_empty());
-    assert_eq!(paths[0], "/Users/dev/project/crates/shaders/src/backends/metal/kernel/matmul/gemm/shaders");
+    assert_eq!(paths[0], rooted("Users/dev/project/crates/shaders/src/backends/metal/kernel/matmul/gemm/shaders"));
 
     // Ancestor chain should include the kernel root.
-    assert!(paths.contains(&"/Users/dev/project/crates/shaders/src/backends/metal/kernel".to_string()));
+    assert!(paths.contains(&rooted("Users/dev/project/crates/shaders/src/backends/metal/kernel")));
 
     // And the project root.
-    assert!(paths.contains(&"/Users/dev/project".to_string()));
+    assert!(paths.contains(&rooted("Users/dev/project")));
 
-    // Every ancestor up to `/` should be present.
-    assert!(paths.contains(&"/".to_string()));
+    // Every ancestor up to the filesystem root should be present.
+    assert!(paths.contains(&rooted("")));
+}
+
+#[test]
+fn include_paths_from_percent_encoded_file_uri() {
+    // VS Code percent-encodes the drive colon on Windows and spaces everywhere.
+    let uri = rooted_uri("Users/dev/my shaders/test.metal").replacen("C:", "c%3A", 1);
+    let paths = MetalCompiler::include_paths_from_uri(&uri);
+    assert_eq!(paths[0].to_ascii_lowercase(), rooted("Users/dev/my shaders").to_ascii_lowercase());
 }
 
 #[test]
@@ -170,10 +192,10 @@ fn include_paths_from_non_file_uri() {
 
 #[test]
 fn include_paths_simple_file() {
-    let paths = MetalCompiler::include_paths_from_uri("file:///Users/dev/shader.metal");
+    let paths = MetalCompiler::include_paths_from_uri(&rooted_uri("Users/dev/shader.metal"));
     assert!(!paths.is_empty());
     // First entry is the file's own directory.
-    assert_eq!(paths[0], "/Users/dev");
+    assert_eq!(paths[0], rooted("Users/dev"));
 }
 
 #[test]
@@ -430,12 +452,12 @@ kernel void k(device uint* out [[buffer(0)]], uint id [[thread_position_in_grid]
     compiler.ensure_system_includes_ready().await;
 
     let include_paths = compute_include_paths(&owner, Some(std::slice::from_ref(&temp_dir)));
-    let owner_uri = format!("file://{}", owner.display());
+    let owner_uri = Url::from_file_path(&owner).expect("owner URI").to_string();
     let owner_source = std::fs::read_to_string(&owner).expect("owner source");
     let owner_diags = compiler.compile_with_include_paths(&owner_source, &owner_uri, &include_paths).await;
     assert!(owner_diags.is_empty(), "owner TU compile should be clean, got: {:?}", owner_diags);
 
-    let header_uri = format!("file://{}", header.display());
+    let header_uri = Url::from_file_path(&header).expect("header URI").to_string();
     let header_source = std::fs::read_to_string(&header).expect("header source");
     let header_diags = compiler.compile_with_include_paths(&header_source, &header_uri, &include_paths).await;
     // The standalone header compile (without the owning TU's `#define APP_TYPE`)

@@ -2,7 +2,7 @@ mod common;
 
 use std::sync::Arc;
 
-use common::{fixture_path, fixture_uri, has_metal_compiler, include_paths_for, position_of, read_fixture};
+use common::{fixture_path, fixture_uri, has_metal_compiler, include_paths_for, position_of, read_fixture, slash_path};
 use metal_analyzer::{DefinitionProvider, HoverProvider, SymbolProvider, syntax::SyntaxTree};
 use tower_lsp::lsp_types::{HoverContents, MarkedString};
 
@@ -50,7 +50,7 @@ fn references_include_cross_file_uses_for_shared_symbol() {
     let refs = provider
         .provide_references(&uri, position, &source, &include_paths, &snapshot, true)
         .expect("expected references for shared_mul");
-    let paths: Vec<String> = refs.iter().map(|loc| loc.file_path.to_string_lossy().to_string()).collect();
+    let paths: Vec<String> = refs.iter().map(|loc| slash_path(&loc.file_path)).collect();
 
     assert!(
         paths.iter().any(|p| p.ends_with("/common/math_ops.h")),

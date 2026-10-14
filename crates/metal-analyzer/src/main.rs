@@ -3,7 +3,7 @@ use std::sync::Arc;
 use clap::Parser;
 use metal_analyzer::server::{
     MetalLanguageServer,
-    formatting::{FormattingError, clang_format_args, run_clang_format},
+    formatting::{clang_format_args, run_clang_format_with_fallback},
 };
 use tower_lsp::{Client, LspService, Server, lsp_types::MessageType};
 use tracing::info;
@@ -55,8 +55,8 @@ fn default_log_path() -> std::path::PathBuf {
 }
 
 fn log_directory() -> std::path::PathBuf {
-    if let Some(home) = std::env::var_os("HOME") {
-        let directory = std::path::PathBuf::from(home).join(".metal-analyzer");
+    if let Some(home) = std::env::home_dir() {
+        let directory = home.join(".metal-analyzer");
         if std::fs::create_dir_all(&directory).is_ok() {
             return directory;
         }
@@ -122,7 +122,7 @@ async fn run_format(fmt_args: FormatArgs) -> Result<std::process::ExitCode, Box<
             },
         };
 
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let canonical = dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         let args = clang_format_args(&fmt_args.args, canonical.display().to_string());
 
         let formatted = match run_clang_format_with_fallback(&fmt_args.command, &args, &input).await {
@@ -156,22 +156,6 @@ async fn run_format(fmt_args: FormatArgs) -> Result<std::process::ExitCode, Box<
         Ok(std::process::ExitCode::from(1))
     } else {
         Ok(std::process::ExitCode::SUCCESS)
-    }
-}
-
-async fn run_clang_format_with_fallback(
-    command: &str,
-    args: &[String],
-    input: &str,
-) -> Result<String, FormattingError> {
-    match run_clang_format(command, args, input).await {
-        Ok(output) => Ok(output),
-        Err(FormattingError::CommandNotFound(_)) if command == "clang-format" => {
-            let mut xcrun_args = vec!["clang-format".to_string()];
-            xcrun_args.extend(args.iter().cloned());
-            run_clang_format("xcrun", &xcrun_args, input).await
-        },
-        Err(error) => Err(error),
     }
 }
 

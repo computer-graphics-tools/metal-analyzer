@@ -134,7 +134,7 @@ pub(crate) fn resolve_framework_include(framework_root: &str, include_path: &str
 }
 
 pub(crate) fn normalize_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]

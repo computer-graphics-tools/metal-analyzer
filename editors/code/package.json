@@ -83,7 +83,7 @@
         "metal-analyzer.serverPath": {
           "type": "string",
           "default": "metal-analyzer",
-          "markdownDescription": "Path to the metal-analyzer binary. The default value uses PATH first, then auto-downloads the latest macOS release binary."
+          "markdownDescription": "Path to the metal-analyzer binary. The default value uses PATH first, then auto-downloads the latest release binary (macOS and Windows)."
         },
         "metal-analyzer.formatting.enable": {
           "markdownDescription": "Enable LSP-backed document formatting.",
@@ -179,7 +179,7 @@
           }
         },
         "metal-analyzer.compiler.extraFlags": {
-          "markdownDescription": "Extra compiler flags passed to `xcrun metal`.",
+          "markdownDescription": "Extra compiler flags passed to the Metal compiler (`xcrun metal` on macOS, `metal.exe` on Windows).",
           "default": [],
           "type": "array",
           "items": {

@@ -18,7 +18,10 @@ struct NavigationFixture {
 }
 
 fn has_metal_compiler() -> bool {
-    std::process::Command::new("xcrun").args(["--find", "metal"]).output().is_ok_and(|output| output.status.success())
+    metal_analyzer::metal::toolchain::metal_command()
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success())
 }
 
 fn fixture_cases_root() -> PathBuf {

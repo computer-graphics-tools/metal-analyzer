@@ -39,7 +39,7 @@ fn fixtures_dir() -> PathBuf {
 }
 
 fn has_metal_compiler() -> bool {
-    std::process::Command::new("xcrun").args(["--find", "metal"]).output().is_ok_and(|o| o.status.success())
+    metal_analyzer::metal::toolchain::metal_command().arg("--version").output().is_ok_and(|o| o.status.success())
 }
 
 /// Extract all (line, col, word) triples for identifier tokens in the source.

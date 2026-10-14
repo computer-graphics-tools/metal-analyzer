@@ -6,7 +6,7 @@ All settings are available under the `metal-analyzer.` prefix in VS Code setting
 
 - `metal-analyzer.serverPath` — Path to the metal-analyzer binary.
   The default value (`metal-analyzer`) uses PATH first, then auto-downloads
-  the latest macOS release binary.
+  the latest release binary (macOS and Windows).
 
 <!-- $generated-start - generated from config.rs via schema_fields() -->
 
@@ -35,7 +35,7 @@ All settings are available under the `metal-analyzer.` prefix in VS Code setting
 ## Compiler
 
 - `metal-analyzer.compiler.includePaths` - Extra include directories passed to the Metal compiler.
-- `metal-analyzer.compiler.extraFlags` - Extra compiler flags passed to `xcrun metal`.
+- `metal-analyzer.compiler.extraFlags` - Extra compiler flags passed to the Metal compiler (`xcrun metal` on macOS, `metal.exe` on Windows).
 - `metal-analyzer.compiler.platform` - Target platform for Metal diagnostics. Determines which platform define (e.g. `__METAL_MACOS__`) is injected unless platform flags are already present in extra flags. Values: `macos`, `ios`, `tvos`, `watchos`, `xros`.
 
 ## Logging

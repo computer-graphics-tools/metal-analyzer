@@ -52,6 +52,7 @@ let hasShownUnexpectedShutdownNotice = false;
 let clientStateSubscription;
 const execFileAsync = (0, node_util_1.promisify)(node_child_process_1.execFile);
 const SERVER_NAME = "metal-analyzer";
+const SERVER_BINARY_NAME = process.platform === "win32" ? `${SERVER_NAME}.exe` : SERVER_NAME;
 const GITHUB_REPO = "computer-graphics-tools/metal-analyzer";
 const GITHUB_LATEST_RELEASE_API = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
 async function activate(context) {
@@ -271,8 +272,8 @@ async function resolveServerPath(context, configuredServerPath) {
     if (configuredServerPath !== SERVER_NAME) {
         return configuredServerPath;
     }
-    if (await isCommandAvailable(SERVER_NAME)) {
-        return SERVER_NAME;
+    if (await isCommandAvailable(SERVER_BINARY_NAME)) {
+        return SERVER_BINARY_NAME;
     }
     const installRoot = getInstallRoot(context);
     const cachedBinaryPath = await findNewestInstalledBinary(installRoot);
@@ -306,8 +307,17 @@ async function isCommandAvailable(command) {
     }
 }
 function releaseAssetNameForCurrentPlatform() {
+    if (process.platform === "win32") {
+        if (process.arch === "arm64") {
+            return "metal-analyzer-aarch64-pc-windows-msvc.zip";
+        }
+        if (process.arch === "x64") {
+            return "metal-analyzer-x86_64-pc-windows-msvc.zip";
+        }
+        throw new Error(`Unsupported Windows architecture: ${process.arch}. Install manually and set metal-analyzer.serverPath.`);
+    }
     if (process.platform !== "darwin") {
-        throw new Error("metal-analyzer auto-install currently supports macOS only. Install manually and set metal-analyzer.serverPath.");
+        throw new Error("metal-analyzer auto-install currently supports macOS and Windows only. Install manually and set metal-analyzer.serverPath.");
     }
     if (process.arch === "arm64") {
         return "metal-analyzer-aarch64-apple-darwin.tar.gz";
@@ -323,11 +333,11 @@ async function ensureLatestDownloadedBinary(installRoot) {
     const assetName = releaseAssetNameForCurrentPlatform();
     const matchingAsset = release.assets.find((asset) => asset.name === assetName);
     if (!matchingAsset) {
-        throw new Error(`No release asset found for ${assetName}`);
+        throw new Error(`No release asset found for ${assetName} in ${release.tag_name}. Install ${SERVER_NAME} manually (for example \`cargo install metal-analyzer\`), then add it to PATH or set metal-analyzer.serverPath.`);
     }
     const versionDirName = `${SERVER_NAME}-${release.tag_name}`;
     const versionDirPath = path.join(installRoot, versionDirName);
-    const binaryPath = path.join(versionDirPath, SERVER_NAME);
+    const binaryPath = path.join(versionDirPath, SERVER_BINARY_NAME);
     if (await isExecutable(binaryPath)) {
         return binaryPath;
     }
@@ -335,7 +345,9 @@ async function ensureLatestDownloadedBinary(installRoot) {
     const archivePath = path.join(versionDirPath, assetName);
     await downloadFile(matchingAsset.browser_download_url, archivePath);
     await extractArchive(archivePath, versionDirPath);
-    await fs.chmod(binaryPath, 0o755);
+    if (process.platform !== "win32") {
+        await fs.chmod(binaryPath, 0o755);
+    }
     await fs.rm(archivePath, { force: true });
     await removeOutdatedInstalledVersions(installRoot, versionDirName);
     return binaryPath;
@@ -425,6 +437,14 @@ async function downloadFile(url, destinationPath) {
     });
 }
 async function extractArchive(archivePath, outputDirectory) {
+    if (process.platform === "win32") {
+        // Use the bsdtar bundled with Windows 10+ (it also extracts .zip archives)
+        // rather than whatever `tar` comes first on PATH, e.g. Git's GNU tar.
+        const systemRoot = process.env.SystemRoot ?? "C:\\Windows";
+        const tarPath = path.join(systemRoot, "System32", "tar.exe");
+        await execFileAsync(tarPath, ["-xf", archivePath, "-C", outputDirectory]);
+        return;
+    }
     await execFileAsync("tar", ["-xzf", archivePath, "-C", outputDirectory]);
 }
 async function isExecutable(filePath) {
@@ -456,7 +476,7 @@ async function findNewestInstalledBinary(installRoot) {
     }
     const sortedEntries = entries.sort((left, right) => right.modifiedAtMs - left.modifiedAtMs);
     for (const entry of sortedEntries) {
-        const candidateBinaryPath = path.join(entry.path, SERVER_NAME);
+        const candidateBinaryPath = path.join(entry.path, SERVER_BINARY_NAME);
         if (await isExecutable(candidateBinaryPath)) {
             return candidateBinaryPath;
         }
@@ -469,9 +489,13 @@ async function removeOutdatedInstalledVersions(installRoot, currentVersionDirNam
         .filter((entry) => entry.isDirectory() &&
         entry.name.startsWith(`${SERVER_NAME}-`) &&
         entry.name !== currentVersionDirName)
-        .map((entry) => fs.rm(path.join(installRoot, entry.name), {
+        .map((entry) => fs
+        .rm(path.join(installRoot, entry.name), {
         recursive: true,
         force: true,
-    })));
+    })
+        // Windows refuses to delete a binary that is still running (e.g. in
+        // another VS Code window); leave it for a later cleanup.
+        .catch(() => undefined)));
 }
 //# sourceMappingURL=extension.js.map

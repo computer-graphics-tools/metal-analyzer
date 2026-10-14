@@ -6,7 +6,7 @@ use tracing::{debug, info, warn};
 
 use crate::{
     ide::lsp::{ide_location_to_lsp, ide_range_to_lsp, navigation_target_to_lsp},
-    metal::compiler::MetalCompiler,
+    metal::{compiler::MetalCompiler, toolchain},
     progress::ProgressToken,
     semantic_tokens::get_legend,
     server::{
@@ -101,11 +101,11 @@ impl LanguageServer for MetalLanguageServer {
                 client
                     .show_message(
                         MessageType::ERROR,
-                        prefixed_client_message(
+                        prefixed_client_message(format!(
                             "Metal compiler toolchain or SDK is unavailable. Diagnostics, indexing, and go-to-definition require both. \
-                             Try: xcode-select --install; sudo xcode-select -s /Applications/Xcode.app/Contents/Developer; \
-                             xcodebuild -downloadComponent MetalToolchain",
-                        ),
+                             {}",
+                            toolchain::install_hint()
+                        )),
                     )
                     .await;
             }
@@ -448,7 +448,7 @@ impl LanguageServer for MetalLanguageServer {
         let uri = params.text_document.uri;
         let keep_workspace_diagnostics = self.settings_snapshot().await.diagnostics.scope.is_workspace();
         if let Ok(path) = uri.to_file_path() {
-            let cache_key = path.canonicalize().unwrap_or(path);
+            let cache_key = dunce::canonicalize(&path).unwrap_or(path);
             self.include_paths_cache.remove(&cache_key);
         }
         self.document_store.close(&uri);
@@ -791,7 +791,7 @@ fn short_name(uri: &Url) -> String {
 }
 
 fn short_path(path: &str) -> &str {
-    path.rsplit('/').next().unwrap_or(path)
+    std::path::Path::new(path).file_name().and_then(|name| name.to_str()).unwrap_or(path)
 }
 
 fn prefixed_client_message(message: impl AsRef<str>) -> String {

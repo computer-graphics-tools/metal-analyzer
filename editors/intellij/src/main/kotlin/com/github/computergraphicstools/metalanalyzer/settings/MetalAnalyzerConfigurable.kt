@@ -13,7 +13,7 @@ class MetalAnalyzerConfigurable : BoundConfigurable("Metal Analyzer") {
             row("Server path:") {
                 textField()
                     .bindText(settings::serverPath)
-                    .comment("Path to the metal-analyzer binary, or \"metal-analyzer\" to use PATH / auto-download")
+                    .comment("Path to the metal-analyzer binary (metal-analyzer.exe on Windows), or \"metal-analyzer\" to use PATH / auto-download")
                     .columns(COLUMNS_LARGE)
             }
         }

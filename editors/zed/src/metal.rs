@@ -30,7 +30,10 @@ impl MetalExtension {
             return Ok(path.clone());
         }
 
-        if let Some(path) = worktree.which(SERVER_NAME) {
+        let (os, arch) = zed::current_platform();
+        let binary_name = server_binary_name(os);
+
+        if let Some(path) = worktree.which(binary_name) {
             self.cached_binary_path = Some(path.clone());
             return Ok(path);
         }
@@ -42,7 +45,7 @@ impl MetalExtension {
         // The release check below only runs on a true first install, when no
         // binary exists yet. To force an upgrade, delete the cached
         // `metal-analyzer-*` directory or set `lsp.metal-analyzer.binary.path`.
-        if let Some(path) = find_cached_binary() {
+        if let Some(path) = find_cached_binary(binary_name) {
             self.cached_binary_path = Some(path.clone());
             return Ok(path);
         }
@@ -66,17 +69,18 @@ impl MetalExtension {
             );
         })?;
 
-        let (os, arch) = zed::current_platform();
         let release_asset_name = match (os, arch) {
             (Os::Mac, Architecture::Aarch64) => "metal-analyzer-aarch64-apple-darwin.tar.gz",
             (Os::Mac, Architecture::X8664) => "metal-analyzer-x86_64-apple-darwin.tar.gz",
+            (Os::Windows, Architecture::Aarch64) => "metal-analyzer-aarch64-pc-windows-msvc.zip",
+            (Os::Windows, Architecture::X8664) => "metal-analyzer-x86_64-pc-windows-msvc.zip",
             _ => {
                 zed::set_language_server_installation_status(
                     language_server_id,
                     &zed::LanguageServerInstallationStatus::None,
                 );
                 return Err(format!(
-                    "{SERVER_NAME} auto-install is currently supported on macOS only.\n\
+                    "{SERVER_NAME} auto-install is currently supported on macOS and Windows only.\n\
                      Install it manually with:\n\
                      \n\
                      cargo install metal-analyzer\n\
@@ -89,7 +93,7 @@ impl MetalExtension {
         };
 
         let version_dir = format!("{SERVER_NAME}-{}", release.version);
-        let binary_path = format!("{version_dir}/{SERVER_NAME}");
+        let binary_path = format!("{version_dir}/{binary_name}");
         if fs::metadata(&binary_path).is_ok_and(|stat| stat.is_file()) {
             self.cached_binary_path = Some(binary_path.clone());
             zed::set_language_server_installation_status(
@@ -103,7 +107,14 @@ impl MetalExtension {
             .assets
             .iter()
             .find(|asset| asset.name == release_asset_name)
-            .ok_or_else(|| format!("no release asset found matching {release_asset_name}"))
+            .ok_or_else(|| {
+                format!(
+                    "no release asset found matching {release_asset_name} in {}.\n\
+                     Install {SERVER_NAME} manually (e.g. `cargo install metal-analyzer`) and add it to PATH,\n\
+                     or set `lsp.{SERVER_NAME}.binary.path` in your Zed settings.\n",
+                    release.version
+                )
+            })
             .inspect_err(|_| {
                 zed::set_language_server_installation_status(
                     language_server_id,
@@ -115,18 +126,25 @@ impl MetalExtension {
             language_server_id,
             &zed::LanguageServerInstallationStatus::Downloading,
         );
-        zed::download_file(&asset.download_url, &version_dir, DownloadedFileType::GzipTar).inspect_err(|_| {
+        let file_type = match os {
+            Os::Windows => DownloadedFileType::Zip,
+            Os::Mac | Os::Linux => DownloadedFileType::GzipTar,
+        };
+        zed::download_file(&asset.download_url, &version_dir, file_type).inspect_err(|_| {
             zed::set_language_server_installation_status(
                 language_server_id,
                 &zed::LanguageServerInstallationStatus::None,
             );
         })?;
-        zed::make_file_executable(&binary_path).inspect_err(|_| {
-            zed::set_language_server_installation_status(
-                language_server_id,
-                &zed::LanguageServerInstallationStatus::None,
-            );
-        })?;
+        // Windows has no executable permission bit; `.exe` files run as-is.
+        if os != Os::Windows {
+            zed::make_file_executable(&binary_path).inspect_err(|_| {
+                zed::set_language_server_installation_status(
+                    language_server_id,
+                    &zed::LanguageServerInstallationStatus::None,
+                );
+            })?;
+        }
         zed::set_language_server_installation_status(language_server_id, &zed::LanguageServerInstallationStatus::None);
 
         remove_outdated_versions(&version_dir)?;
@@ -147,9 +165,16 @@ impl MetalExtension {
     }
 }
 
+fn server_binary_name(os: Os) -> &'static str {
+    match os {
+        Os::Windows => "metal-analyzer.exe",
+        Os::Mac | Os::Linux => SERVER_NAME,
+    }
+}
+
 // Scan the extension work directory for the newest already-downloaded
-// `metal-analyzer-<version>/metal-analyzer` binary, if any.
-fn find_cached_binary() -> Option<String> {
+// `metal-analyzer-<version>/<binary_name>` binary, if any.
+fn find_cached_binary(binary_name: &str) -> Option<String> {
     let prefix = format!("{SERVER_NAME}-");
     let mut newest: Option<(std::time::SystemTime, String)> = None;
     for entry in fs::read_dir(".").ok()?.flatten() {
@@ -160,7 +185,7 @@ fn find_cached_binary() -> Option<String> {
         if !name.starts_with(&prefix) || !entry.path().is_dir() {
             continue;
         }
-        let binary_path = format!("{name}/{SERVER_NAME}");
+        let binary_path = format!("{name}/{binary_name}");
         if !fs::metadata(&binary_path).is_ok_and(|stat| stat.is_file()) {
             continue;
         }

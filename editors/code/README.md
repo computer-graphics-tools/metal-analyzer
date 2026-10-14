@@ -23,13 +23,16 @@ This extension activates when you open a `.metal` file.
 Setting: `metal-analyzer.serverPath`
 
 - Default: `metal-analyzer`
-- Behavior on macOS:
-  - If `metal-analyzer` is in `PATH`, it is used.
+- Behavior on macOS and Windows:
+  - If `metal-analyzer` (`metal-analyzer.exe` on Windows) is in `PATH`, it is used.
   - Otherwise the extension downloads the latest GitHub release binary automatically.
 
 You can also set an absolute path, for example:
 
 - `~/.cargo/bin/metal-analyzer`
+- `C:\Users\<you>\.cargo\bin\metal-analyzer.exe`
+
+On Windows, diagnostics require Apple's [Metal Developer Tools for Windows](https://developer.apple.com/metal/tools/). `metal-analyzer` finds `metal.exe` in `PATH` or in the default install location (`%ProgramFiles%\Metal Developer Tools\bin`).
 
 ## Settings
 

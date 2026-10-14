@@ -85,8 +85,8 @@ fn save_to_root(
 }
 
 fn default_cache_dir() -> PathBuf {
-    if let Some(home) = std::env::var_os("HOME") {
-        return PathBuf::from(home).join(".metal-analyzer").join("index-cache");
+    if let Some(home) = std::env::home_dir() {
+        return home.join(".metal-analyzer").join("index-cache");
     }
     std::env::temp_dir().join("metal-analyzer-index-cache")
 }
@@ -114,7 +114,7 @@ fn stable_hash_hex(input: &str) -> String {
 }
 
 fn normalized_path_string(path: &Path) -> String {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf()).display().to_string()
+    dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()).display().to_string()
 }
 
 #[cfg(test)]

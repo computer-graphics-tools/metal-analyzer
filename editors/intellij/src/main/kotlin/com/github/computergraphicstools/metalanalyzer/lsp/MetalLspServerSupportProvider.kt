@@ -7,6 +7,7 @@ import com.intellij.notification.Notifications
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Key
+import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.platform.lsp.api.LspServerSupportProvider
@@ -37,15 +38,23 @@ class MetalLspServerSupportProvider : LspServerSupportProvider {
                 "<br/><br/>Details: <code>${StringUtil.escapeXmlEntities(reason)}</code>"
             } ?: ""
 
+            val content = if (SystemInfo.isWindows) {
+                "Metal compiler (<code>metal.exe</code>) is unavailable. Diagnostics, indexing, and go-to-definition require it.<br/>" +
+                    "Install Metal Developer Tools for Windows from <code>$METAL_TOOLS_URL</code>, " +
+                    "or add its <code>bin</code> directory to <code>PATH</code>.$details"
+            } else {
+                "Metal compiler toolchain or SDK is unavailable. Diagnostics, indexing, and go-to-definition require both.<br/>" +
+                    "Try:<br/>" +
+                    "<code>xcode-select --install</code><br/>" +
+                    "<code>sudo xcode-select -s /Applications/Xcode.app/Contents/Developer</code><br/>" +
+                    "<code>xcodebuild -downloadComponent MetalToolchain</code>$details"
+            }
+
             Notifications.Bus.notify(
                 Notification(
                     NOTIFICATION_GROUP_ID,
                     "Metal toolchain missing",
-                    "Metal compiler toolchain or SDK is unavailable. Diagnostics, indexing, and go-to-definition require both.<br/>" +
-                        "Try:<br/>" +
-                        "<code>xcode-select --install</code><br/>" +
-                        "<code>sudo xcode-select -s /Applications/Xcode.app/Contents/Developer</code><br/>" +
-                        "<code>xcodebuild -downloadComponent MetalToolchain</code>$details",
+                    content,
                     NotificationType.ERROR,
                 ),
                 project,
@@ -56,5 +65,6 @@ class MetalLspServerSupportProvider : LspServerSupportProvider {
     companion object {
         private val TOOLCHAIN_CHECK_STARTED_KEY = Key.create<Boolean>("metal.analyzer.toolchain.check.started")
         private const val NOTIFICATION_GROUP_ID = "Metal Analyzer"
+        private const val METAL_TOOLS_URL = "https://developer.apple.com/metal/tools/"
     }
 }

@@ -2,6 +2,7 @@ mod common;
 
 use common::{
     fixture_path, fixture_uri, has_metal_compiler, include_paths_for, line_contains, position_of, read_fixture,
+    slash_path,
 };
 use metal_analyzer::{
     DefinitionProvider, IdeLocation, NavigationTarget,
@@ -59,7 +60,7 @@ fn goto_def_include_resolves_generated_header() {
     let target = first_location(result);
 
     assert!(
-        target.file_path.to_string_lossy().ends_with("/generated/matmul.h"),
+        slash_path(&target.file_path).ends_with("/generated/matmul.h"),
         "expected generated header target, got {}",
         target.file_path.display()
     );
@@ -84,7 +85,7 @@ fn goto_def_prefers_qualified_fixture_transform() {
     let target = first_location(result);
 
     assert!(
-        target.file_path.to_string_lossy().ends_with("common/transforms.h"),
+        slash_path(&target.file_path).ends_with("common/transforms.h"),
         "expected fixture transform header, got {}",
         target.file_path.display()
     );
@@ -109,7 +110,7 @@ fn goto_def_prefers_qualified_steel_transform() {
     let target = first_location(result);
 
     assert!(
-        target.file_path.to_string_lossy().ends_with("steel/gemm/transforms.h"),
+        slash_path(&target.file_path).ends_with("steel/gemm/transforms.h"),
         "expected steel transform header, got {}",
         target.file_path.display()
     );
@@ -134,8 +135,8 @@ fn goto_def_prefers_qualified_fixture_loader() {
     let target = first_location(result);
 
     assert!(
-        target.file_path.to_string_lossy().ends_with("common/loader.h")
-            && !target.file_path.to_string_lossy().ends_with("steel/gemm/loader.h"),
+        slash_path(&target.file_path).ends_with("common/loader.h")
+            && !slash_path(&target.file_path).ends_with("steel/gemm/loader.h"),
         "expected fixture loader header, got {}",
         target.file_path.display()
     );
@@ -160,7 +161,7 @@ fn goto_def_prefers_qualified_steel_loader() {
     let target = first_location(result);
 
     assert!(
-        target.file_path.to_string_lossy().ends_with("steel/gemm/loader.h"),
+        slash_path(&target.file_path).ends_with("steel/gemm/loader.h"),
         "expected steel loader header, got {}",
         target.file_path.display()
     );
@@ -186,7 +187,7 @@ fn goto_def_unqualified_loader_resolves_local_header() {
     let target = first_location(result);
 
     assert!(
-        target.file_path.to_string_lossy().ends_with("matmul/gemv/shaders/loader.h"),
+        slash_path(&target.file_path).ends_with("matmul/gemv/shaders/loader.h"),
         "expected local loader.h to win for unqualified include, got {}",
         target.file_path.display()
     );
@@ -228,7 +229,7 @@ struct Kernel {
 };
 "#
     .to_string();
-    let uri = Url::parse("file:///tmp/gemv_like_bn_fast_path.metal").expect("valid URI");
+    let uri = Url::from_file_path(std::env::temp_dir().join("gemv_like_bn_fast_path.metal")).expect("valid URI");
     let include_paths = Vec::new();
     let snapshot = SyntaxTree::parse(&source);
     let provider = DefinitionProvider::new();
@@ -266,7 +267,7 @@ async fn diagnostics_include_macro_redefinition_note_pair() {
     let has_previous_definition_note = diagnostics.iter().any(|d| {
         d.severity == DiagnosticSeverity::INFORMATION
             && d.message.to_lowercase().contains("previous definition")
-            && d.file.as_deref().is_some_and(|f| f.ends_with("common/defines.h"))
+            && d.file.as_deref().is_some_and(|f| slash_path(f).ends_with("common/defines.h"))
     });
 
     assert!(has_redefine_warning, "expected macro-redefined warning in gemv_like.metal diagnostics: {:?}", diagnostics);
@@ -289,7 +290,7 @@ async fn diagnostics_report_deep_header_error_on_header_file() {
 
     let header_error = diagnostics.iter().find(|d| {
         d.severity == DiagnosticSeverity::ERROR
-            && d.file.as_deref().is_some_and(|f| f.ends_with("common/broken_header.h"))
+            && d.file.as_deref().is_some_and(|f| slash_path(f).ends_with("common/broken_header.h"))
     });
 
     assert!(header_error.is_some(), "expected header-attributed error for deep include chain, got: {:?}", diagnostics);

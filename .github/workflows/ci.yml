@@ -101,6 +101,27 @@ jobs:
       - name: Build Zed extension
         run: cargo build -p zed_metal --target wasm32-wasip2 --release
 
+  test-windows:
+    name: Test ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    needs: version-consistency
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-11-arm]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo outputs
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run tests
+        run: cargo test -p metal-analyzer
+
   build-intellij:
     name: Build IntelliJ Plugin
     runs-on: ubuntu-latest

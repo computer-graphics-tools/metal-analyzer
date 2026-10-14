@@ -1,22 +1,15 @@
-use std::{
-    process::Command,
-    sync::atomic::{AtomicU64, Ordering},
-};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use tower_lsp::lsp_types::Url;
 use tracing::{debug, warn};
+
+use crate::metal::toolchain;
 
 static NEXT_AST_DUMP_ID: AtomicU64 = AtomicU64::new(1);
 
 #[cfg(test)]
 pub(crate) fn ast_dump_counter() -> u64 {
     NEXT_AST_DUMP_ID.load(Ordering::Relaxed)
-}
-
-fn xcrun_command(args: &[String]) -> Command {
-    let mut command = Command::new("xcrun");
-    command.args(args);
-    command
 }
 
 pub(crate) fn run_ast_dump(
@@ -50,7 +43,6 @@ pub(crate) fn run_ast_dump(
     }
 
     let mut args = vec![
-        "metal".to_string(),
         "-Xclang".to_string(),
         "-ast-dump=json".to_string(),
         "-fsyntax-only".to_string(),
@@ -87,10 +79,10 @@ pub(crate) fn run_ast_dump(
         }
     }
 
-    debug!("AST dump: xcrun {}", args.join(" "));
+    debug!("AST dump: metal {}", args.join(" "));
 
-    let mut command = xcrun_command(&args);
-    let output = match command.output() {
+    let mut command = toolchain::metal_command();
+    let output = match command.args(&args).output() {
         Ok(output) => output,
         Err(error) => {
             warn!("Failed to run AST dump: {error}");
@@ -99,7 +91,7 @@ pub(crate) fn run_ast_dump(
     };
 
     let raw_tmp_file = src_file.display().to_string();
-    let canonical_tmp_file = std::fs::canonicalize(&src_file).ok().map(|path| path.display().to_string());
+    let canonical_tmp_file = dunce::canonicalize(&src_file).ok().map(|path| path.display().to_string());
     let mut tmp_files = vec![raw_tmp_file];
     if let Some(canonical) = canonical_tmp_file
         && !tmp_files.contains(&canonical)

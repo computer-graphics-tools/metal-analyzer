@@ -6,7 +6,11 @@ use std::{
 use tokio::{io::AsyncWriteExt, process::Command};
 use tower_lsp::lsp_types::{FormattingOptions, Position, Range, TextEdit};
 
-use crate::{document::Document, server::metalfmt, server::settings::FormattingSettings};
+use crate::{
+    document::Document,
+    metal::toolchain,
+    server::{metalfmt, settings::FormattingSettings},
+};
 
 pub async fn format_document(
     document: &Document,
@@ -18,15 +22,7 @@ pub async fn format_document(
 
     let args = clang_format_args(&formatting_settings.args, assume_filename);
 
-    let formatted = match run_clang_format(&formatting_settings.command, &args, &document.text).await {
-        Ok(output) => output,
-        Err(FormattingError::CommandNotFound(_)) if formatting_settings.command == "clang-format" => {
-            let mut xcrun_args = vec!["clang-format".to_string()];
-            xcrun_args.extend(args);
-            run_clang_format("xcrun", &xcrun_args, &document.text).await?
-        },
-        Err(error) => return Err(error),
-    };
+    let formatted = run_clang_format_with_fallback(&formatting_settings.command, &args, &document.text).await?;
 
     if formatted == document.text {
         return Ok(None);
@@ -53,8 +49,7 @@ pub fn clang_format_args(
     let mut args = extra_args.to_vec();
 
     // Try to resolve a metalfmt.toml for the source file.
-    let style = std::path::Path::new(&assume_filename)
-        .canonicalize()
+    let style = dunce::canonicalize(&assume_filename)
         .ok()
         .and_then(|p| metalfmt::resolve_inline_style(&p))
         .map(|inline| format!("{{{inline}}}"))
@@ -71,12 +66,32 @@ pub fn clang_format_args(
     args
 }
 
+/// Run `command`, falling back to the platform's bundled clang-format
+/// (see [`toolchain::clang_format_fallback`]) when the default `clang-format`
+/// is not on `PATH`.
+pub async fn run_clang_format_with_fallback(
+    command: &str,
+    args: &[String],
+    input: &str,
+) -> Result<String, FormattingError> {
+    match run_clang_format(command, args, input).await {
+        Err(FormattingError::CommandNotFound(missing)) if command == "clang-format" => {
+            let Some((fallback, mut fallback_args)) = toolchain::clang_format_fallback() else {
+                return Err(FormattingError::CommandNotFound(missing));
+            };
+            fallback_args.extend(args.iter().cloned());
+            run_clang_format(&fallback, &fallback_args, input).await
+        },
+        result => result,
+    }
+}
+
 pub async fn run_clang_format(
     executable: &str,
     args: &[String],
     input: &str,
 ) -> Result<String, FormattingError> {
-    let mut child = Command::new(executable)
+    let mut child = Command::from(toolchain::background_command(executable))
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

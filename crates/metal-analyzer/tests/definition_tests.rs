@@ -20,6 +20,14 @@ fn system_header_detection() {
 }
 
 #[test]
+fn system_header_detection_handles_windows_paths() {
+    assert!(is_system_header(
+        r"C:\Program Files\Metal Developer Tools\metal\32023\lib\clang\32023.850\include\metal\metal_stdlib"
+    ));
+    assert!(!is_system_header(r"C:\Users\dev\project\shaders/utils.h"));
+}
+
+#[test]
 fn paths_match_identical() {
     assert!(paths_match("/tmp/foo.metal", "/tmp/foo.metal"));
 }

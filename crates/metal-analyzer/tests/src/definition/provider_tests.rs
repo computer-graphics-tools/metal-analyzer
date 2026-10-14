@@ -4,7 +4,7 @@ static AST_DUMP_COUNTER_TEST_LOCK: once_cell::sync::Lazy<std::sync::Mutex<()>> =
     once_cell::sync::Lazy::new(|| std::sync::Mutex::new(()));
 
 fn has_metal_compiler() -> bool {
-    std::process::Command::new("xcrun").args(["--find", "metal"]).output().is_ok_and(|o| o.status.success())
+    crate::metal::toolchain::metal_command().arg("--version").output().is_ok_and(|o| o.status.success())
 }
 
 fn position_of(
@@ -30,7 +30,7 @@ struct Kernel {
 };
 "#;
     let snapshot = SyntaxTree::parse(source);
-    let uri = Url::parse("file:///tmp/kernel.metal").expect("valid uri");
+    let uri = Url::from_file_path(std::env::temp_dir().join("kernel.metal")).expect("valid uri");
     let usage = position_of(source, "BN * TM");
 
     let result =
@@ -627,11 +627,11 @@ fn system_builtin_header_candidates_include_dynamic_toolchain_headers() {
     let include_paths = vec![temp_dir.display().to_string()];
     let candidates = system_builtin_header_candidates(&include_paths);
     assert!(
-        candidates.contains(&dynamic_header.canonicalize().expect("canonical dynamic header")),
+        candidates.contains(&dunce::canonicalize(&dynamic_header).expect("canonical dynamic header")),
         "dynamic headers in include roots should be considered as builtin symbol candidates"
     );
     assert!(
-        candidates.contains(&nested_dynamic_header.canonicalize().expect("canonical nested dynamic header")),
+        candidates.contains(&dunce::canonicalize(&nested_dynamic_header).expect("canonical nested dynamic header")),
         "dynamic headers under include_root/metal should be considered as builtin symbol candidates"
     );
 
@@ -684,7 +684,7 @@ kernel void k(device float* sinks [[buffer(0)]], uint tid [[thread_position_in_g
             panic!("expected goto-definition target for builtin symbol: {symbol}");
         };
         assert!(
-            location.file_path.to_string_lossy().contains("/metal/"),
+            location.file_path.to_string_lossy().replace('\\', "/").contains("/metal/"),
             "expected symbol `{symbol}` to resolve into a Metal SDK header, got {}",
             location.file_path.display()
         );

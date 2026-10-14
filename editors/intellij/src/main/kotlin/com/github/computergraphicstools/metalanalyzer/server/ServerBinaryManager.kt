@@ -7,8 +7,10 @@ import com.intellij.openapi.util.SystemInfo
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.PosixFilePermissions
 import java.util.concurrent.TimeUnit
+import java.util.zip.ZipInputStream
 
 object ServerBinaryManager {
     private val LOG = Logger.getInstance(ServerBinaryManager::class.java)
@@ -16,9 +18,21 @@ object ServerBinaryManager {
     private const val GITHUB_REPO = "computer-graphics-tools/metal-analyzer"
     private const val GITHUB_LATEST_RELEASE_API = "https://api.github.com/repos/$GITHUB_REPO/releases/latest"
     private const val TOOLCHAIN_CHECK_TIMEOUT_SECONDS = 8L
+    private const val WINDOWS_METAL_COMPILER = "metal.exe"
 
     private val installRoot: Path
         get() = Path.of(PathManager.getSystemPath(), SERVER_NAME)
+
+    private val serverBinaryName: String
+        get() = if (SystemInfo.isWindows) "$SERVER_NAME.exe" else SERVER_NAME
+
+    private val windowsDefaultMetalCompiler: Path
+        get() = Path.of(
+            System.getenv("ProgramFiles") ?: "C:\\Program Files",
+            "Metal Developer Tools",
+            "bin",
+            WINDOWS_METAL_COMPILER,
+        )
 
     data class ToolchainStatus(
         val available: Boolean,
@@ -38,7 +52,7 @@ object ServerBinaryManager {
             return configured
         }
 
-        findOnPath()?.let { return it }
+        findOnPath(serverBinaryName)?.let { return it }
 
         findCachedBinary()?.let { cached ->
             tryDownloadLatest()?.let { return it }
@@ -48,11 +62,16 @@ object ServerBinaryManager {
         tryDownloadLatest()?.let { return it }
 
         throw IllegalStateException(
-            "Could not locate $SERVER_NAME. Install it manually and set the server path in Settings > Languages & Frameworks > Metal Analyzer."
+            "Could not locate $SERVER_NAME, and no prebuilt release binary could be downloaded for this platform. " +
+                "Install it manually (e.g. `cargo install metal-analyzer`), then add it to PATH or set the server path in Settings > Languages & Frameworks > Metal Analyzer."
         )
     }
 
     fun checkToolchainAvailability(): ToolchainStatus {
+        if (SystemInfo.isWindows) {
+            return checkWindowsToolchainAvailability()
+        }
+
         if (!SystemInfo.isMac) {
             return ToolchainStatus(available = true)
         }
@@ -84,14 +103,28 @@ object ServerBinaryManager {
         return ToolchainStatus(available = true)
     }
 
-    private fun findOnPath(): String? {
+    // The Metal Developer Tools for Windows installer does not add itself to PATH,
+    // so also look in the default install location.
+    private fun checkWindowsToolchainAvailability(): ToolchainStatus {
+        if (findOnPath(WINDOWS_METAL_COMPILER) != null || Files.isRegularFile(windowsDefaultMetalCompiler)) {
+            return ToolchainStatus(available = true)
+        }
+
+        return ToolchainStatus(
+            available = false,
+            reason = "`$WINDOWS_METAL_COMPILER` not found in PATH or at $windowsDefaultMetalCompiler",
+        )
+    }
+
+    private fun findOnPath(executableName: String): String? {
         return try {
-            val process = ProcessBuilder("which", SERVER_NAME)
-                .redirectErrorStream(true)
-                .start()
-            val output = process.inputStream.bufferedReader().readText().trim()
-            val exitCode = process.waitFor()
-            if (exitCode == 0 && output.isNotEmpty() && File(output).canExecute()) output else null
+            val pathEntries = System.getenv("PATH")?.split(File.pathSeparator) ?: return null
+            pathEntries
+                .map { it.trim().removeSurrounding("\"") }
+                .filter { it.isNotEmpty() }
+                .map { File(it, executableName) }
+                .firstOrNull { it.isFile && it.canExecute() }
+                ?.absolutePath
         } catch (e: Exception) {
             LOG.debug("PATH lookup failed", e)
             null
@@ -106,14 +139,14 @@ object ServerBinaryManager {
             ?.filter { it.isDirectory && it.name.startsWith("$SERVER_NAME-") }
             ?.sortedByDescending { it.lastModified() }
             ?.firstNotNullOfOrNull { dir ->
-                val binary = File(dir, SERVER_NAME)
+                val binary = File(dir, serverBinaryName)
                 if (binary.canExecute()) binary.absolutePath else null
             }
     }
 
     private fun tryDownloadLatest(): String? {
-        if (!SystemInfo.isMac) {
-            LOG.info("Auto-download is only supported on macOS")
+        if (!SystemInfo.isMac && !SystemInfo.isWindows) {
+            LOG.info("Auto-download is only supported on macOS and Windows")
             return null
         }
 
@@ -131,10 +164,13 @@ object ServerBinaryManager {
         val releaseJson = curlGet(GITHUB_LATEST_RELEASE_API)
             ?: throw IllegalStateException("Failed to fetch release metadata from GitHub")
         val tagName = extractJsonString(releaseJson, "tag_name") ?: return null
-        val downloadUrl = extractAssetDownloadUrl(releaseJson, assetName) ?: return null
+        val downloadUrl = extractAssetDownloadUrl(releaseJson, assetName) ?: run {
+            LOG.warn("Release $tagName has no $assetName asset; install $SERVER_NAME manually and add it to PATH or set the server path")
+            return null
+        }
 
         val versionDir = installRoot.resolve("$SERVER_NAME-$tagName")
-        val binaryPath = versionDir.resolve(SERVER_NAME)
+        val binaryPath = versionDir.resolve(serverBinaryName)
 
         if (Files.isExecutable(binaryPath)) {
             return binaryPath.toString()
@@ -145,12 +181,18 @@ object ServerBinaryManager {
 
         curlDownload(downloadUrl, archivePath.toFile())
 
-        ProcessBuilder("tar", "-xzf", archivePath.toString(), "-C", versionDir.toString())
-            .redirectErrorStream(true)
-            .start()
-            .waitFor()
+        if (assetName.endsWith(".zip")) {
+            extractZip(archivePath, versionDir)
+        } else {
+            ProcessBuilder("tar", "-xzf", archivePath.toString(), "-C", versionDir.toString())
+                .redirectErrorStream(true)
+                .start()
+                .waitFor()
+        }
 
-        Files.setPosixFilePermissions(binaryPath, PosixFilePermissions.fromString("rwxr-xr-x"))
+        if (!SystemInfo.isWindows) {
+            Files.setPosixFilePermissions(binaryPath, PosixFilePermissions.fromString("rwxr-xr-x"))
+        }
         Files.deleteIfExists(archivePath)
         removeOutdatedVersions(tagName)
 
@@ -182,12 +224,39 @@ object ServerBinaryManager {
 
     private fun releaseAssetName(): String? {
         val arch = System.getProperty("os.arch") ?: return null
+        if (SystemInfo.isWindows) {
+            return when {
+                arch == "aarch64" || arch == "arm64" -> "metal-analyzer-aarch64-pc-windows-msvc.zip"
+                arch == "x86_64" || arch == "amd64" -> "metal-analyzer-x86_64-pc-windows-msvc.zip"
+                else -> {
+                    LOG.warn("Unsupported Windows architecture: $arch")
+                    null
+                }
+            }
+        }
+
         return when {
             arch == "aarch64" || arch == "arm64" -> "metal-analyzer-aarch64-apple-darwin.tar.gz"
             arch == "x86_64" || arch == "amd64" -> "metal-analyzer-x86_64-apple-darwin.tar.gz"
             else -> {
                 LOG.warn("Unsupported macOS architecture: $arch")
                 null
+            }
+        }
+    }
+
+    private fun extractZip(archivePath: Path, outputDir: Path) {
+        val root = outputDir.toAbsolutePath().normalize()
+        ZipInputStream(Files.newInputStream(archivePath)).use { zip ->
+            generateSequence { zip.nextEntry }.forEach { entry ->
+                val target = root.resolve(entry.name).normalize()
+                check(target.startsWith(root)) { "Zip entry escapes target directory: ${entry.name}" }
+                if (entry.isDirectory) {
+                    Files.createDirectories(target)
+                } else {
+                    Files.createDirectories(target.parent)
+                    Files.copy(zip, target, StandardCopyOption.REPLACE_EXISTING)
+                }
             }
         }
     }

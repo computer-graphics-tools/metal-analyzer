@@ -90,22 +90,27 @@ fn filter_target_diagnostics_drops_ambiguous_relative_header_path() {
 
 #[test]
 fn diagnostic_paths_match_accepts_equivalent_absolute_paths() {
-    assert!(diagnostic_paths_match("/tmp/project/dir/../include/utils.h", "/tmp/project/include/utils.h",));
+    let project = std::env::temp_dir().join("metal-analyzer-missing-project");
+    assert!(diagnostic_paths_match(
+        &project.join("dir/../include/utils.h").display().to_string(),
+        &project.join("include/utils.h").display().to_string(),
+    ));
 }
 
 #[test]
 fn filter_attaches_cross_file_note_as_related_info() {
-    let target = std::path::Path::new("/tmp/gemv.metal");
+    let target = std::env::temp_dir().join("gemv.metal");
+    let target = target.as_path();
     let diagnostics = vec![
         MetalDiagnostic {
-            file: Some("/tmp/gemv.metal".to_string()),
+            file: Some(target.display().to_string()),
             line: 13,
             column: 8,
             severity: DiagnosticSeverity::WARNING,
             message: "warning from primary file".to_string(),
         },
         MetalDiagnostic {
-            file: Some("/tmp/defines.h".to_string()),
+            file: Some(std::env::temp_dir().join("defines.h").display().to_string()),
             line: 3,
             column: 8,
             severity: DiagnosticSeverity::INFORMATION,

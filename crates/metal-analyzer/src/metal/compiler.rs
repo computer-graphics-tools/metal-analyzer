@@ -8,9 +8,10 @@ use std::{
 };
 
 use regex::Regex;
-use tokio::process::Command;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range, Url};
 use tracing::{debug, error, warn};
+
+use crate::metal::toolchain;
 
 static NEXT_COMPILATION_ID: AtomicU64 = AtomicU64::new(1);
 const METAL_MACOS_DEFINE: &str = "-D__METAL_MACOS__";
@@ -62,10 +63,13 @@ impl CompilerPlatform {
     }
 }
 
-fn xcrun_command() -> Command {
-    let mut command = Command::new("xcrun");
-    command.kill_on_drop(true);
-    command
+/// Convert a `file://` URI string into a local filesystem path.
+fn file_path_from_uri(uri: &str) -> Option<PathBuf> {
+    Url::parse(uri).ok()?.to_file_path().ok()
+}
+
+fn file_display_from_uri(uri: &str) -> Option<String> {
+    file_path_from_uri(uri).map(|path| path.display().to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -262,7 +266,7 @@ fn normalize_existing_path(path: PathBuf) -> Option<PathBuf> {
     if !path.exists() {
         return None;
     }
-    Some(path.canonicalize().unwrap_or(path))
+    Some(dunce::canonicalize(&path).unwrap_or(path))
 }
 
 fn dedupe_existing_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
@@ -304,7 +308,8 @@ impl MetalDiagnostic {
     }
 }
 
-/// Manages invocation of the Metal shader compiler (`xcrun metal`)
+/// Manages invocation of the Metal shader compiler (`xcrun metal` on macOS,
+/// `metal.exe` on Windows)
 /// and parsing of its diagnostic output.
 ///
 /// Supports configurable include paths and extra compiler flags so that
@@ -326,7 +331,7 @@ pub struct MetalCompiler {
     /// Serializes first-time include discovery so startup races don't trigger
     /// duplicate discovery calls.
     include_discovery_lock: tokio::sync::Mutex<()>,
-    /// Canonical path to the active `xcrun --find metal` binary.
+    /// Canonical path to the active Metal compiler binary.
     ///
     /// Used to detect toolchain upgrades while the language server is running.
     toolchain_signature: RwLock<Option<String>>,
@@ -363,7 +368,7 @@ impl MetalCompiler {
         }
     }
 
-    /// Run `xcrun metal -v` to parse default search paths from stderr.
+    /// Run `metal -v` to parse default search paths from stderr.
     /// This allows us to resolve `<metal_stdlib>` and other system headers.
     pub async fn discover_system_includes(&self) {
         let detected_signature = Self::detect_toolchain_signature().await;
@@ -374,16 +379,16 @@ impl MetalCompiler {
         &self,
         detected_signature: Option<String>,
     ) {
-        let mut command = xcrun_command();
+        let mut command = toolchain::async_metal_command();
         let output = match command
-            .args(["metal", "-v", "-E", "-"]) // -E to preprocess, - to read from stdin
+            .args(["-v", "-E", "-"]) // -E to preprocess, - to read from stdin
             .stdin(std::process::Stdio::null())
             .output()
             .await
         {
             Ok(o) => o,
             Err(e) => {
-                warn!("Failed to run xcrun metal -v: {e}");
+                warn!("Failed to run metal -v: {e}");
                 if let Some(signature) = detected_signature {
                     self.store_toolchain_signature(Some(signature));
                 }
@@ -486,15 +491,15 @@ impl MetalCompiler {
         }
     }
 
-    /// Returns `true` if the Metal compiler binary, macOS SDK, and an actual
-    /// `xcrun metal` probe invocation are all healthy.
+    /// Returns `true` if the Metal compiler binary, platform SDK (macOS only),
+    /// and an actual compiler probe invocation are all healthy.
     pub async fn is_toolchain_available() -> bool {
         let toolchain_signature = Self::detect_toolchain_signature().await;
         if toolchain_signature.is_none() {
             return false;
         }
 
-        if Self::detect_macos_sdk_path().await.is_none() {
+        if !toolchain::has_platform_sdk().await {
             return false;
         }
 
@@ -502,36 +507,12 @@ impl MetalCompiler {
     }
 
     async fn detect_toolchain_signature() -> Option<String> {
-        let mut command = xcrun_command();
-        let output = command.args(["--find", "metal"]).output().await.ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        let raw_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if raw_path.is_empty() {
-            return None;
-        }
-        let path = PathBuf::from(raw_path);
-        Some(path.canonicalize().unwrap_or(path).display().to_string())
-    }
-
-    async fn detect_macos_sdk_path() -> Option<String> {
-        let mut command = xcrun_command();
-        let output = command.args(["--sdk", "macosx", "--show-sdk-path"]).output().await.ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        let raw_path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if raw_path.is_empty() {
-            return None;
-        }
-        let path = PathBuf::from(raw_path);
-        Some(path.canonicalize().unwrap_or(path).display().to_string())
+        toolchain::find_metal_compiler().await.map(|path| path.display().to_string())
     }
 
     async fn probe_compiler_execution() -> bool {
-        let mut command = xcrun_command();
-        command.args(["metal", "-v", "-E", "-"]).stdin(std::process::Stdio::null());
+        let mut command = toolchain::async_metal_command();
+        command.args(["-v", "-E", "-"]).stdin(std::process::Stdio::null());
         command.output().await.map(|output| output.status.success()).unwrap_or(false)
     }
 
@@ -639,7 +620,7 @@ impl MetalCompiler {
         if let Err(e) = tokio::fs::create_dir_all(&self.temp_dir).await {
             error!("Failed to create compiler temp dir {:?}: {}", self.temp_dir, e);
             return vec![MetalDiagnostic {
-                file: uri.strip_prefix("file://").map(|s| s.replace("%20", " ")),
+                file: file_display_from_uri(uri),
                 line: 0,
                 column: 0,
                 severity: DiagnosticSeverity::ERROR,
@@ -652,7 +633,7 @@ impl MetalCompiler {
         if let Err(e) = tokio::fs::write(&temp_file, source).await {
             error!("Failed to write temporary shader file: {}", e);
             return vec![MetalDiagnostic {
-                file: uri.strip_prefix("file://").map(|s| s.replace("%20", " ")),
+                file: file_display_from_uri(uri),
                 line: 0,
                 column: 0,
                 severity: DiagnosticSeverity::ERROR,
@@ -661,7 +642,6 @@ impl MetalCompiler {
         }
 
         let mut args = vec![
-            "metal".to_string(),
             "-c".to_string(),
             temp_file.display().to_string(),
             "-o".to_string(),
@@ -686,9 +666,9 @@ impl MetalCompiler {
         debug!("Resolved compiler flags (platform={}): {:?}", platform.as_setting_value(), effective_flags);
         args.extend(effective_flags);
 
-        debug!("Running: xcrun {}", args.join(" "));
+        debug!("Running: metal {}", args.join(" "));
 
-        let mut command = xcrun_command();
+        let mut command = toolchain::async_metal_command();
         let result = command.args(&args).output().await;
 
         let _ = tokio::fs::remove_file(&temp_file).await;
@@ -698,7 +678,7 @@ impl MetalCompiler {
             Ok(output) => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 debug!("Metal compiler stderr:\n{}", stderr);
-                let original_path = uri.strip_prefix("file://").map(|s| s.replace("%20", " "));
+                let original_path = file_display_from_uri(uri);
                 self.parse_diagnostics(&stderr)
                     .into_iter()
                     .map(|diag| remap_diagnostic_file(diag, original_path.as_deref(), &temp_file))
@@ -707,7 +687,7 @@ impl MetalCompiler {
             Err(e) => {
                 error!("Failed to run Metal compiler: {}", e);
                 vec![MetalDiagnostic {
-                    file: uri.strip_prefix("file://").map(|s| s.replace("%20", " ")),
+                    file: file_display_from_uri(uri),
                     line: 0,
                     column: 0,
                     severity: DiagnosticSeverity::ERROR,
@@ -783,15 +763,10 @@ impl MetalCompiler {
     /// A `BTreeSet` is used to collect unique paths and the result is
     /// returned in a deterministic (sorted) order.
     fn include_paths_from_uri(uri: &str) -> Vec<String> {
-        let path_str = if let Some(stripped) = uri.strip_prefix("file://") {
-            // Percent-decode the path (basic: spaces only; full decoding could
-            // be added later).
-            stripped.replace("%20", " ")
-        } else {
+        let Some(path) = file_path_from_uri(uri) else {
             return Vec::new();
         };
 
-        let path = Path::new(&path_str);
         let mut unique = BTreeSet::new();
 
         // Walk up from the file's own directory through every ancestor.
@@ -914,7 +889,8 @@ fn remap_diagnostic_file(
         return diagnostic;
     };
     let diag_path = Path::new(&raw_file);
-    let temp_matches = diag_path == temp_file || diag_path.canonicalize().ok() == temp_file.canonicalize().ok();
+    let temp_matches =
+        diag_path == temp_file || dunce::canonicalize(diag_path).ok() == dunce::canonicalize(temp_file).ok();
     if temp_matches {
         if let Some(original) = original_path {
             diagnostic.file = Some(original.to_owned());
@@ -924,10 +900,10 @@ fn remap_diagnostic_file(
         && let Some(parent) = Path::new(original).parent()
     {
         let resolved = parent.join(diag_path);
-        diagnostic.file = Some(resolved.canonicalize().unwrap_or(resolved).display().to_string());
+        diagnostic.file = Some(dunce::canonicalize(&resolved).unwrap_or(resolved).display().to_string());
     } else {
         diagnostic.file =
-            Some(diag_path.canonicalize().unwrap_or_else(|_| diag_path.to_path_buf()).display().to_string());
+            Some(dunce::canonicalize(diag_path).unwrap_or_else(|_| diag_path.to_path_buf()).display().to_string());
     }
     diagnostic
 }

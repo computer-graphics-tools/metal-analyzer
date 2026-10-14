@@ -6,7 +6,15 @@ use metal_analyzer::metal::compiler::compute_include_paths;
 use tower_lsp::lsp_types::{Position, Url};
 
 pub fn has_metal_compiler() -> bool {
-    std::process::Command::new("xcrun").args(["--find", "metal"]).output().is_ok_and(|output| output.status.success())
+    metal_analyzer::metal::toolchain::metal_command()
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success())
+}
+
+/// Render a path with `/` separators so suffix checks also hold on Windows.
+pub fn slash_path(path: impl AsRef<Path>) -> String {
+    path.as_ref().to_string_lossy().replace('\\', "/")
 }
 
 pub fn fixture_cases_root() -> PathBuf {

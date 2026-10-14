@@ -40,5 +40,5 @@ impl std::fmt::Display for FileId {
 }
 
 pub fn normalized_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }

@@ -5,9 +5,10 @@
     <description><![CDATA[
         Metal Shading Language (MSL) support powered by the
         <a href="https://github.com/computer-graphics-tools/metal-analyzer">metal-analyzer</a>
-        language server.
+        language server. Works on macOS (Xcode) and Windows
+        (<a href="https://developer.apple.com/metal/tools/">Metal Developer Tools for Windows</a>).
         <ul>
-            <li>Real-time diagnostics via xcrun metal</li>
+            <li>Real-time diagnostics via the Metal compiler (xcrun metal on macOS, metal.exe on Windows)</li>
             <li>Auto-completion for built-in types, functions, and keywords</li>
             <li>Hover documentation</li>
             <li>Go to definition, declaration, type definition, implementation, and references</li>
