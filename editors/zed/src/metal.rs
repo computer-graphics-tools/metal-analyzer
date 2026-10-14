@@ -107,14 +107,7 @@ impl MetalExtension {
             .assets
             .iter()
             .find(|asset| asset.name == release_asset_name)
-            .ok_or_else(|| {
-                format!(
-                    "no release asset found matching {release_asset_name} in {}.\n\
-                     Install {SERVER_NAME} manually (e.g. `cargo install metal-analyzer`) and add it to PATH,\n\
-                     or set `lsp.{SERVER_NAME}.binary.path` in your Zed settings.\n",
-                    release.version
-                )
-            })
+            .ok_or_else(|| format!("no release asset found matching {release_asset_name}"))
             .inspect_err(|_| {
                 zed::set_language_server_installation_status(
                     language_server_id,
@@ -136,7 +129,6 @@ impl MetalExtension {
                 &zed::LanguageServerInstallationStatus::None,
             );
         })?;
-        // Windows has no executable permission bit; `.exe` files run as-is.
         if os != Os::Windows {
             zed::make_file_executable(&binary_path).inspect_err(|_| {
                 zed::set_language_server_installation_status(

@@ -11,10 +11,9 @@ Protocol](https://microsoft.github.io/language-server-protocol/) (VS
 Code, Zed, etc).
 
 metal-analyzer features include real-time diagnostics (via `xcrun metal`
-on macOS, or Apple's [Metal Developer Tools for
-Windows](https://developer.apple.com/metal/tools/)), auto-completion for
-built-in types, functions, and keywords, hover documentation, and
-integrated formatting (with clang-format).
+on macOS or [Metal Developer Tools](https://developer.apple.com/metal/tools/)
+on Windows), auto-completion for built-in types, functions, and keywords,
+hover documentation, and integrated formatting (with clang-format).
 
 ## Quick Start
 

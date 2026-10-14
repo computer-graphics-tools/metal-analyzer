@@ -66,9 +66,6 @@ pub fn clang_format_args(
     args
 }
 
-/// Run `command`, falling back to the platform's bundled clang-format
-/// (see [`toolchain::clang_format_fallback`]) when the default `clang-format`
-/// is not on `PATH`.
 pub async fn run_clang_format_with_fallback(
     command: &str,
     args: &[String],

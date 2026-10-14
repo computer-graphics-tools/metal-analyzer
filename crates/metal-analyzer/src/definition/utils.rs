@@ -66,7 +66,6 @@ pub fn def_to_location(def: &SymbolDef) -> Option<IdeLocation> {
 
 /// Returns `true` if a file path looks like a system / SDK header.
 pub fn is_system_header(path: &str) -> bool {
-    // Windows toolchain paths use `\` (or a mix of both separators).
     let path = if path.contains('\\') {
         std::borrow::Cow::Owned(path.replace('\\', "/"))
     } else {

@@ -142,7 +142,6 @@ fn include_cache_is_fresh_detects_signature_and_path_staleness() {
     std::fs::remove_dir_all(&temp_dir).ok();
 }
 
-/// Absolute path below the filesystem root (`/` or `C:\`), as a native string.
 fn rooted(relative: &str) -> String {
     let root = if cfg!(windows) {
         PathBuf::from(r"C:\")
@@ -178,7 +177,6 @@ fn include_paths_from_file_uri() {
 
 #[test]
 fn include_paths_from_percent_encoded_file_uri() {
-    // VS Code percent-encodes the drive colon on Windows and spaces everywhere.
     let uri = rooted_uri("Users/dev/my shaders/test.metal").replacen("C:", "c%3A", 1);
     let paths = MetalCompiler::include_paths_from_uri(&uri);
     assert_eq!(paths[0].to_ascii_lowercase(), rooted("Users/dev/my shaders").to_ascii_lowercase());

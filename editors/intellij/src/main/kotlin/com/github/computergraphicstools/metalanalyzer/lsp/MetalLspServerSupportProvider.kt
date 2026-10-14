@@ -39,9 +39,8 @@ class MetalLspServerSupportProvider : LspServerSupportProvider {
             } ?: ""
 
             val content = if (SystemInfo.isWindows) {
-                "Metal compiler (<code>metal.exe</code>) is unavailable. Diagnostics, indexing, and go-to-definition require it.<br/>" +
-                    "Install Metal Developer Tools for Windows from <code>$METAL_TOOLS_URL</code>, " +
-                    "or add its <code>bin</code> directory to <code>PATH</code>.$details"
+                "Metal compiler toolchain is unavailable. Diagnostics, indexing, and go-to-definition require it.<br/>" +
+                    "Install Metal Developer Tools for Windows: <code>$METAL_TOOLS_URL</code>$details"
             } else {
                 "Metal compiler toolchain or SDK is unavailable. Diagnostics, indexing, and go-to-definition require both.<br/>" +
                     "Try:<br/>" +

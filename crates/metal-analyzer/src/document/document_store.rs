@@ -7,11 +7,6 @@ use crate::document::Document;
 ///
 /// Uses `DashMap` internally so that all operations are safe to call
 /// concurrently from any async task without external synchronisation.
-///
-/// Documents are keyed by a normalized form of their URI, so a URI built
-/// from a filesystem path finds the document the client opened even when the
-/// client spells it differently (VS Code on Windows sends `file:///c%3A/...`,
-/// while `Url::from_file_path` produces `file:///C:/...`).
 #[derive(Debug)]
 pub struct DocumentStore {
     documents: DashMap<Url, Document>,
@@ -94,7 +89,6 @@ impl DocumentStore {
         self.documents.get(&key(uri)).map(|r| r.value().clone())
     }
 
-    /// Return the URI the client used to open the document matching `uri`.
     pub fn client_uri(
         &self,
         uri: &Url,

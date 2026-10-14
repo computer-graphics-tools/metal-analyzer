@@ -1,16 +1,5 @@
-//! Locating and launching the Metal toolchain.
-//!
-//! On macOS every tool is reached through `xcrun`. On Windows, Apple's Metal
-//! Developer Tools (<https://developer.apple.com/metal/tools/>) install a
-//! standalone `metal.exe` that the installer does not add to `PATH`, and no
-//! SDK is required because the Metal headers ship with the compiler.
-
 use std::{ffi::OsStr, path::PathBuf};
 
-/// Create a [`std::process::Command`] for a non-interactive helper tool.
-///
-/// On Windows this suppresses the console window that would otherwise pop up
-/// for every compiler invocation when the server runs without a console.
 pub fn background_command(program: impl AsRef<OsStr>) -> std::process::Command {
     #[allow(unused_mut)]
     let mut command = std::process::Command::new(program);
@@ -23,8 +12,6 @@ pub fn background_command(program: impl AsRef<OsStr>) -> std::process::Command {
     command
 }
 
-/// Create a command that runs the Metal compiler (`xcrun metal` on macOS,
-/// `metal.exe` on Windows). Arguments added by the caller go to the compiler.
 pub fn metal_command() -> std::process::Command {
     #[cfg(windows)]
     {
@@ -38,14 +25,12 @@ pub fn metal_command() -> std::process::Command {
     }
 }
 
-/// Async variant of [`metal_command`]. The child is killed if dropped.
 pub fn async_metal_command() -> tokio::process::Command {
     let mut command = tokio::process::Command::from(metal_command());
     command.kill_on_drop(true);
     command
 }
 
-/// Resolve the canonical path of the active Metal compiler binary.
 pub async fn find_metal_compiler() -> Option<PathBuf> {
     #[cfg(windows)]
     {
@@ -59,7 +44,6 @@ pub async fn find_metal_compiler() -> Option<PathBuf> {
     }
 }
 
-/// Returns `true` if the platform SDK needed by the compiler is installed.
 pub async fn has_platform_sdk() -> bool {
     #[cfg(windows)]
     {
@@ -71,9 +55,6 @@ pub async fn has_platform_sdk() -> bool {
     }
 }
 
-/// Formatter to try when the default `clang-format` is not on `PATH`, as a
-/// program plus leading arguments: `xcrun clang-format` on macOS, or an LLVM
-/// or Visual Studio install on Windows.
 pub fn clang_format_fallback() -> Option<(String, Vec<String>)> {
     #[cfg(windows)]
     {
@@ -85,11 +66,9 @@ pub fn clang_format_fallback() -> Option<(String, Vec<String>)> {
     }
 }
 
-/// Hint shown to users when the Metal toolchain cannot be found.
 pub fn install_hint() -> &'static str {
     if cfg!(windows) {
-        "Install the Metal Developer Tools for Windows from https://developer.apple.com/metal/tools/ \
-         (or add the folder containing metal.exe to PATH)"
+        "Install Metal Developer Tools for Windows: https://developer.apple.com/metal/tools/"
     } else {
         "Try: xcode-select --install; sudo xcode-select -s /Applications/Xcode.app/Contents/Developer; \
          xcodebuild -downloadComponent MetalToolchain"
@@ -114,8 +93,6 @@ async fn xcrun_output(args: &[&str]) -> Option<String> {
 mod windows {
     use std::path::{Path, PathBuf};
 
-    /// Locate the Metal compiler: `metal.exe` on `PATH`, then the default
-    /// `%ProgramFiles%\Metal Developer Tools` install location.
     pub(super) fn find_metal() -> Option<PathBuf> {
         let launcher = find_on_path("metal.exe")
             .or_else(|| find_in_program_files(Path::new(r"Metal Developer Tools\bin\metal.exe")))?;
@@ -123,10 +100,6 @@ mod windows {
         Some(versioned_compiler(&launcher).unwrap_or(launcher))
     }
 
-    /// `<install>\bin\metal.exe` is a launcher that forwards to
-    /// `<install>\metal\<version>\bin\metal.exe`, but it drops argument
-    /// quoting, so every path containing a space is split in two. Invoke the
-    /// newest versioned compiler directly instead.
     pub(super) fn versioned_compiler(launcher: &Path) -> Option<PathBuf> {
         let versions_dir = launcher.parent()?.parent()?.join("metal");
         std::fs::read_dir(versions_dir)
@@ -146,15 +119,11 @@ mod windows {
             .map(|(_, compiler)| compiler)
     }
 
-    /// Locate `clang-format.exe` from an LLVM install or Visual Studio's
-    /// "C++ Clang tools" component.
     pub(super) fn find_clang_format() -> Option<PathBuf> {
         if let Some(path) = find_in_program_files(Path::new(r"LLVM\bin\clang-format.exe")) {
             return Some(path);
         }
 
-        // <ProgramFiles>\Microsoft Visual Studio\<version>\<edition>\VC\Tools\Llvm\<arch>\bin
-        // On ARM64, x64 builds also work through Windows' x64 emulation.
         let arch_dirs: &[&str] = if cfg!(target_arch = "aarch64") {
             &["ARM64", "x64"]
         } else {

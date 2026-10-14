@@ -405,7 +405,6 @@ async fn publish_workspace_diagnostics_for_file(
             diagnostic_count: 0,
         };
     };
-    // Diagnostics state for open files is keyed by the client's URI spelling.
     let uri = open_documents.client_uri(&uri).unwrap_or(uri);
 
     // Only skip open files if didOpen/didChange already claimed them

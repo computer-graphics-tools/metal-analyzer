@@ -12,7 +12,6 @@ pub fn has_metal_compiler() -> bool {
         .is_ok_and(|output| output.status.success())
 }
 
-/// Render a path with `/` separators so suffix checks also hold on Windows.
 pub fn slash_path(path: impl AsRef<Path>) -> String {
     path.as_ref().to_string_lossy().replace('\\', "/")
 }

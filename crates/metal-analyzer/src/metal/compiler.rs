@@ -63,7 +63,6 @@ impl CompilerPlatform {
     }
 }
 
-/// Convert a `file://` URI string into a local filesystem path.
 fn file_path_from_uri(uri: &str) -> Option<PathBuf> {
     Url::parse(uri).ok()?.to_file_path().ok()
 }
@@ -308,8 +307,7 @@ impl MetalDiagnostic {
     }
 }
 
-/// Manages invocation of the Metal shader compiler (`xcrun metal` on macOS,
-/// `metal.exe` on Windows)
+/// Manages invocation of the Metal shader compiler
 /// and parsing of its diagnostic output.
 ///
 /// Supports configurable include paths and extra compiler flags so that
@@ -491,8 +489,8 @@ impl MetalCompiler {
         }
     }
 
-    /// Returns `true` if the Metal compiler binary, platform SDK (macOS only),
-    /// and an actual compiler probe invocation are all healthy.
+    /// Returns `true` if the Metal compiler binary, SDK, and an actual
+    /// compiler probe invocation are all healthy.
     pub async fn is_toolchain_available() -> bool {
         let toolchain_signature = Self::detect_toolchain_signature().await;
         if toolchain_signature.is_none() {

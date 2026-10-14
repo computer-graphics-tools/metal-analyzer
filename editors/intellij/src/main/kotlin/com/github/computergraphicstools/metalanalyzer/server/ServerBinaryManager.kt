@@ -62,8 +62,7 @@ object ServerBinaryManager {
         tryDownloadLatest()?.let { return it }
 
         throw IllegalStateException(
-            "Could not locate $SERVER_NAME, and no prebuilt release binary could be downloaded for this platform. " +
-                "Install it manually (e.g. `cargo install metal-analyzer`), then add it to PATH or set the server path in Settings > Languages & Frameworks > Metal Analyzer."
+            "Could not locate $SERVER_NAME. Install it manually and set the server path in Settings > Languages & Frameworks > Metal Analyzer."
         )
     }
 
@@ -103,8 +102,6 @@ object ServerBinaryManager {
         return ToolchainStatus(available = true)
     }
 
-    // The Metal Developer Tools for Windows installer does not add itself to PATH,
-    // so also look in the default install location.
     private fun checkWindowsToolchainAvailability(): ToolchainStatus {
         if (findOnPath(WINDOWS_METAL_COMPILER) != null || Files.isRegularFile(windowsDefaultMetalCompiler)) {
             return ToolchainStatus(available = true)
@@ -164,10 +161,7 @@ object ServerBinaryManager {
         val releaseJson = curlGet(GITHUB_LATEST_RELEASE_API)
             ?: throw IllegalStateException("Failed to fetch release metadata from GitHub")
         val tagName = extractJsonString(releaseJson, "tag_name") ?: return null
-        val downloadUrl = extractAssetDownloadUrl(releaseJson, assetName) ?: run {
-            LOG.warn("Release $tagName has no $assetName asset; install $SERVER_NAME manually and add it to PATH or set the server path")
-            return null
-        }
+        val downloadUrl = extractAssetDownloadUrl(releaseJson, assetName) ?: return null
 
         val versionDir = installRoot.resolve("$SERVER_NAME-$tagName")
         val binaryPath = versionDir.resolve(serverBinaryName)

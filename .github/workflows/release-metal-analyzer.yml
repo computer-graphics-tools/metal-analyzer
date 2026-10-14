@@ -92,7 +92,6 @@ jobs:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     needs: verify-release-versions
-    # A failed Windows build must not block publishing the macOS assets.
     continue-on-error: ${{ startsWith(matrix.os, 'windows') }}
     strategy:
       fail-fast: false

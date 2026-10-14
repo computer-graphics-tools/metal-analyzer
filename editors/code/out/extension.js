@@ -333,7 +333,7 @@ async function ensureLatestDownloadedBinary(installRoot) {
     const assetName = releaseAssetNameForCurrentPlatform();
     const matchingAsset = release.assets.find((asset) => asset.name === assetName);
     if (!matchingAsset) {
-        throw new Error(`No release asset found for ${assetName} in ${release.tag_name}. Install ${SERVER_NAME} manually (for example \`cargo install metal-analyzer\`), then add it to PATH or set metal-analyzer.serverPath.`);
+        throw new Error(`No release asset found for ${assetName}`);
     }
     const versionDirName = `${SERVER_NAME}-${release.tag_name}`;
     const versionDirPath = path.join(installRoot, versionDirName);
@@ -438,8 +438,6 @@ async function downloadFile(url, destinationPath) {
 }
 async function extractArchive(archivePath, outputDirectory) {
     if (process.platform === "win32") {
-        // Use the bsdtar bundled with Windows 10+ (it also extracts .zip archives)
-        // rather than whatever `tar` comes first on PATH, e.g. Git's GNU tar.
         const systemRoot = process.env.SystemRoot ?? "C:\\Windows";
         const tarPath = path.join(systemRoot, "System32", "tar.exe");
         await execFileAsync(tarPath, ["-xf", archivePath, "-C", outputDirectory]);
@@ -494,8 +492,6 @@ async function removeOutdatedInstalledVersions(installRoot, currentVersionDirNam
         recursive: true,
         force: true,
     })
-        // Windows refuses to delete a binary that is still running (e.g. in
-        // another VS Code window); leave it for a later cleanup.
         .catch(() => undefined)));
 }
 //# sourceMappingURL=extension.js.map

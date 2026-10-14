@@ -194,9 +194,7 @@ pub fn schema_fields() -> Vec<SchemaField> {
         },
         SchemaField {
             key: "compiler.extraFlags".into(),
-            description:
-                "Extra compiler flags passed to the Metal compiler (`xcrun metal` on macOS, `metal.exe` on Windows)."
-                    .into(),
+            description: "Extra compiler flags passed to the Metal compiler.".into(),
             schema_type: SchemaType::StringArray,
             default: Value::Array(vec![]),
         },
@@ -249,7 +247,7 @@ pub fn generate_package_json_properties() -> Value {
         serde_json::json!({
             "type": "string",
             "default": "metal-analyzer",
-            "markdownDescription": "Path to the metal-analyzer binary. The default value uses PATH first, then auto-downloads the latest release binary (macOS and Windows)."
+            "markdownDescription": "Path to the metal-analyzer binary. The default value uses PATH first, then auto-downloads the latest release binary."
         }),
     );
 
