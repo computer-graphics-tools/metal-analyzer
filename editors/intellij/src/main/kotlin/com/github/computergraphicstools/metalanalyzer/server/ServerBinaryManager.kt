@@ -3,7 +3,7 @@ package com.github.computergraphicstools.metalanalyzer.server
 import com.github.computergraphicstools.metalanalyzer.settings.MetalAnalyzerSettings
 import com.intellij.openapi.application.PathManager
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.util.SystemInfo
+import com.intellij.util.system.OS
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
@@ -24,7 +24,7 @@ object ServerBinaryManager {
         get() = Path.of(PathManager.getSystemPath(), SERVER_NAME)
 
     private val serverBinaryName: String
-        get() = if (SystemInfo.isWindows) "$SERVER_NAME.exe" else SERVER_NAME
+        get() = if (OS.CURRENT == OS.Windows) "$SERVER_NAME.exe" else SERVER_NAME
 
     private val windowsDefaultMetalCompiler: Path
         get() = Path.of(
@@ -67,11 +67,11 @@ object ServerBinaryManager {
     }
 
     fun checkToolchainAvailability(): ToolchainStatus {
-        if (SystemInfo.isWindows) {
+        if (OS.CURRENT == OS.Windows) {
             return checkWindowsToolchainAvailability()
         }
 
-        if (!SystemInfo.isMac) {
+        if (OS.CURRENT != OS.macOS) {
             return ToolchainStatus(available = true)
         }
 
@@ -142,7 +142,7 @@ object ServerBinaryManager {
     }
 
     private fun tryDownloadLatest(): String? {
-        if (!SystemInfo.isMac && !SystemInfo.isWindows) {
+        if (OS.CURRENT != OS.macOS && OS.CURRENT != OS.Windows) {
             LOG.info("Auto-download is only supported on macOS and Windows")
             return null
         }
@@ -184,7 +184,7 @@ object ServerBinaryManager {
                 .waitFor()
         }
 
-        if (!SystemInfo.isWindows) {
+        if (OS.CURRENT != OS.Windows) {
             Files.setPosixFilePermissions(binaryPath, PosixFilePermissions.fromString("rwxr-xr-x"))
         }
         Files.deleteIfExists(archivePath)
@@ -218,7 +218,7 @@ object ServerBinaryManager {
 
     private fun releaseAssetName(): String? {
         val arch = System.getProperty("os.arch") ?: return null
-        if (SystemInfo.isWindows) {
+        if (OS.CURRENT == OS.Windows) {
             return when {
                 arch == "aarch64" || arch == "arm64" -> "metal-analyzer-aarch64-pc-windows-msvc.zip"
                 arch == "x86_64" || arch == "amd64" -> "metal-analyzer-x86_64-pc-windows-msvc.zip"

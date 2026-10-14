@@ -7,11 +7,11 @@ import com.intellij.notification.Notifications
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Key
-import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.platform.lsp.api.LspServerSupportProvider
 import com.intellij.platform.lsp.api.LspServerSupportProvider.LspServerStarter
+import com.intellij.util.system.OS
 
 class MetalLspServerSupportProvider : LspServerSupportProvider {
     override fun fileOpened(project: Project, file: VirtualFile, serverStarter: LspServerStarter) {
@@ -38,7 +38,7 @@ class MetalLspServerSupportProvider : LspServerSupportProvider {
                 "<br/><br/>Details: <code>${StringUtil.escapeXmlEntities(reason)}</code>"
             } ?: ""
 
-            val content = if (SystemInfo.isWindows) {
+            val content = if (OS.CURRENT == OS.Windows) {
                 "Metal compiler toolchain is unavailable. Diagnostics, indexing, and go-to-definition require it.<br/>" +
                     "Install Metal Developer Tools for Windows: <code>$METAL_TOOLS_URL</code>$details"
             } else {
