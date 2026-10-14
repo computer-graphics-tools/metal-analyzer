@@ -42,3 +42,18 @@ impl std::fmt::Display for FileId {
 pub fn normalized_path(path: &Path) -> PathBuf {
     dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
+
+/// The system temp directory. On Windows, `%TEMP%` often uses 8.3 short
+/// names (e.g. `C:\Users\JOHNDO~1\...`); expand them to the real folder names.
+pub fn temp_dir() -> PathBuf {
+    let dir = std::env::temp_dir();
+    if cfg!(windows) {
+        normalized_path(&dir)
+    } else {
+        dir
+    }
+}
+
+#[cfg(test)]
+#[path = "../../tests/src/vfs/vfs_tests.rs"]
+mod tests;

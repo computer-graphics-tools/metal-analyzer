@@ -61,7 +61,7 @@ fn log_directory() -> std::path::PathBuf {
             return directory;
         }
     }
-    std::env::temp_dir()
+    metal_analyzer::vfs::temp_dir()
 }
 
 #[tokio::main]

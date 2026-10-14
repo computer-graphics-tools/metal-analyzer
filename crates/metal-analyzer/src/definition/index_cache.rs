@@ -88,7 +88,7 @@ fn default_cache_dir() -> PathBuf {
     if let Some(home) = std::env::home_dir() {
         return home.join(".metal-analyzer").join("index-cache");
     }
-    std::env::temp_dir().join("metal-analyzer-index-cache")
+    crate::vfs::temp_dir().join("metal-analyzer-index-cache")
 }
 
 fn cache_file_path(

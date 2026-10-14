@@ -349,7 +349,7 @@ impl MetalCompiler {
     /// A unique temporary directory is created under the system temp dir
     /// to hold intermediate compilation files.
     pub fn new() -> Self {
-        let temp_dir = std::env::temp_dir().join(format!("metal-analyzer-{}", std::process::id()));
+        let temp_dir = crate::vfs::temp_dir().join(format!("metal-analyzer-{}", std::process::id()));
         if let Err(e) = std::fs::create_dir_all(&temp_dir) {
             warn!("Failed to create temp directory {:?}: {}", temp_dir, e);
         }

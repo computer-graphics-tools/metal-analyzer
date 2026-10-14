@@ -17,7 +17,7 @@ pub(crate) fn run_ast_dump(
     uri: &Url,
     include_paths: &[String],
 ) -> Option<(String, Vec<String>)> {
-    let tmp_dir = std::env::temp_dir().join(format!("metal-analyzer-def-{}", std::process::id()));
+    let tmp_dir = crate::vfs::temp_dir().join(format!("metal-analyzer-def-{}", std::process::id()));
     if std::fs::create_dir_all(&tmp_dir).is_err() {
         warn!("Failed to create temp dir for AST dump");
         return None;
