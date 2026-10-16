@@ -15,7 +15,9 @@ pub fn background_command(program: impl AsRef<OsStr>) -> std::process::Command {
 pub fn metal_command() -> std::process::Command {
     #[cfg(windows)]
     {
-        background_command(windows::find_metal().unwrap_or_else(|| PathBuf::from("metal")))
+        let mut command = background_command(windows::find_metal().unwrap_or_else(|| PathBuf::from("metal")));
+        command.args(["-x", "metal", "-std=metal4.0"]);
+        command
     }
     #[cfg(not(windows))]
     {

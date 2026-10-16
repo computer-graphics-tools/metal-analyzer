@@ -1,5 +1,30 @@
 use super::*;
 
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_diagnostics_support_bfloat_and_lambdas_by_default() {
+    if toolchain::find_metal_compiler().await.is_none() {
+        return;
+    }
+    assert!(MetalCompiler::is_available().await, "Windows compiler probe must accept stdin as Metal");
+
+    let source = r#"#include <metal_stdlib>
+using namespace metal;
+kernel void modern(device bfloat* output [[buffer(0)]]) {
+    auto value = []() { return 1.0f; };
+    output[0] = bfloat(value());
+}
+"#;
+    let compiler = MetalCompiler::new();
+    let uri = Url::from_file_path(std::env::temp_dir().join("modern.metal")).expect("file URI");
+    let diagnostics = compiler.compile_with_include_paths(source, uri.as_str(), &[]).await;
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+    compiler.set_flags(vec!["-std=macos-metal2.2".to_string()]);
+    let diagnostics = compiler.compile_with_include_paths(source, uri.as_str(), &[]).await;
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.severity == DiagnosticSeverity::ERROR));
+}
+
 #[test]
 fn parse_error_line() {
     let compiler = MetalCompiler::new();

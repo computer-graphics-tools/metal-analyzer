@@ -5,7 +5,11 @@ use tracing::debug;
 
 use crate::definition::AstIndex;
 
-const CACHE_SCHEMA_VERSION: u32 = 1;
+const CACHE_SCHEMA_VERSION: u32 = if cfg!(windows) {
+    2
+} else {
+    1
+};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct CachedAstIndex {

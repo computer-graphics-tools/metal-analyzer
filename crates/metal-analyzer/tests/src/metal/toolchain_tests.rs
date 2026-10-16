@@ -1,6 +1,28 @@
 use super::*;
 
 #[cfg(windows)]
+#[tokio::test]
+async fn windows_compiler_defaults_to_metal4_and_allows_standard_override() {
+    if find_metal_compiler().await.is_none() {
+        return;
+    }
+
+    for (flags, expected) in [
+        (Vec::<&str>::new(), "#define __METAL_VERSION__ 400"),
+        (vec!["-std=macos-metal2.2"], "#define __METAL_VERSION__ 220"),
+    ] {
+        let output = metal_command()
+            .args(flags)
+            .args(["-dM", "-E", "-x", "metal", "-"])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("run Windows Metal compiler");
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(String::from_utf8_lossy(&output.stdout).lines().any(|line| line == expected));
+    }
+}
+
+#[cfg(windows)]
 fn temp_install_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "metal-analyzer-toolchain-{name}-{}",

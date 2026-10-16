@@ -81,11 +81,7 @@ def main() -> None:
     })["sha"]
 
     commit_sha_new = api(token, "POST", f"repos/{FORK}/git/commits", {
-        "message": (
-            f"Update metal to v{version}\n\n"
-            f"Release notes:\n\n"
-            f"https://github.com/computer-graphics-tools/metal-analyzer/releases/tag/v{version}"
-        ),
+        "message": f"update metal to v{version}",
         "tree":    tree_sha,
         "parents": [main_sha],
     })["sha"]
